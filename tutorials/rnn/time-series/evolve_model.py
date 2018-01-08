@@ -86,7 +86,7 @@ class PTBModel(object):
 
   def __init__(self, is_training, config, input_):
     self._is_training = is_training
-    self._input       = input_
+    self.__input       = input_
     self._rnn_params  = None
     self._cell        = None
     self.batch_size   = input_.batch_size
@@ -104,39 +104,36 @@ class PTBModel(object):
 
     output, state = self._build_rnn_graph(inputs, config, is_training)
 
-    softmax_w = tf.get_variable(
-        "softmax_w", [size, vocab_size], dtype=util.data_type())
-    softmax_b = tf.get_variable("softmax_b", [vocab_size], dtype=util.data_type())
-    logits = tf.nn.xw_plus_b(output, softmax_w, softmax_b)
-     # Reshape logits to be a 3-D tensor for sequence loss
-    logits = tf.reshape(logits, [self.batch_size, self.num_steps, vocab_size])
+    softmax_w = tf.get_variable("softmax_w", [size, vocab_size], dtype=util.data_type())
+    softmax_b = tf.get_variable("softmax_b", [vocab_size]      , dtype=util.data_type())
+    logits    = tf.nn.xw_plus_b(output, softmax_w, softmax_b)
+    logits_3d = tf.reshape(logits, [self.batch_size, self.num_steps, vocab_size])
 
     # Use the contrib sequence loss and average over the batches
     loss = tf.contrib.seq2seq.sequence_loss(
-        logits,
+        logits_3d,
         input_.targets,
         tf.ones([self.batch_size, self.num_steps], dtype=util.data_type()),
         average_across_timesteps=False,
         average_across_batch=True)
 
     # Update the cost
-    self._cost = tf.reduce_sum(loss)
+    self._cost        = tf.reduce_sum(loss)
     self._final_state = state
 
     if not is_training:
       return
 
-    self._lr = tf.Variable(0.0, trainable=False)
-    tvars    = tf.trainable_variables()
-    grads, _ = tf.clip_by_global_norm(tf.gradients(self._cost, tvars),
+    self._lr       = tf.Variable(0.0, trainable=False)
+    tvars          = tf.trainable_variables()
+    grads, _       = tf.clip_by_global_norm(tf.gradients(self._cost, tvars),
                                       config.max_grad_norm)
     optimizer      = tf.train.GradientDescentOptimizer(self._lr)
     self._train_op = optimizer.apply_gradients(
         zip(grads, tvars),
         global_step=tf.train.get_or_create_global_step())
 
-    self._new_lr = tf.placeholder(
-        tf.float32, shape=[], name="new_learning_rate")
+    self._new_lr    = tf.placeholder(tf.float32, shape=[], name="new_learning_rate")
     self._lr_update = tf.assign(self._lr, self._new_lr)
 
   def _build_rnn_graph(self, inputs, config, is_training):
@@ -163,7 +160,7 @@ class PTBModel(object):
         [make_cell() for _ in range(config.num_layers)], state_is_tuple=True)
 
     self._initial_state = cell.zero_state(config.batch_size, util.data_type())
-    state = self._initial_state
+    state               = self._initial_state
     # Simplified version of tensorflow_models/tutorials/rnn/rnn.py's rnn().
     # This builds an unrolled LSTM for tutorial purposes only.
     # In general, use the rnn() or state_saving_rnn() from rnn.py.
@@ -204,11 +201,11 @@ class PTBModel(object):
   def import_ops(self):
     """Imports ops from collections."""
     if self._is_training:
-      self._train_op  = tf.get_collection_ref("train_op")[0]
-      self._lr        = tf.get_collection_ref("lr")[0]
-      self._new_lr    = tf.get_collection_ref("new_lr")[0]
-      self._lr_update = tf.get_collection_ref("lr_update")[0]
-      rnn_params      = tf.get_collection_ref("rnn_params")
+      self.__train_op  = tf.get_collection_ref("train_op")[0]
+      self.__lr        = tf.get_collection_ref("lr")[0]
+      self.__new_lr    = tf.get_collection_ref("new_lr")[0]
+      self.__lr_update = tf.get_collection_ref("lr_update")[0]
+      rnn_params       = tf.get_collection_ref("rnn_params")
       if self._cell and rnn_params:
         params_saveable = tf.contrib.cudnn_rnn.RNNParamsSaveable(
             self._cell,
@@ -217,36 +214,31 @@ class PTBModel(object):
             rnn_params,
             base_variable_scope="Model/RNN")
         tf.add_to_collection(tf.GraphKeys.SAVEABLE_OBJECTS, params_saveable)
-    self._cost = tf.get_collection_ref(util.with_prefix(self._name, "cost"))[0]
-    num_replicas = util.FLAGS.num_gpus if self._name == "Train" else 1
-    self._initial_state = util.import_state_tuples(
-        self._initial_state, self._initial_state_name, num_replicas)
-    self._final_state = util.import_state_tuples(
-        self._final_state, self._final_state_name, num_replicas)
+    self.__cost          = tf.get_collection_ref(util.with_prefix(self._name, "cost"))[0]
 
   @property
   def input(self):
-    return self._input
+    return self.__input
 
   @property
-  def initial_state(self):
-    return self._initial_state
+  def initial_state_tuples(self):
+    return util.import_state_tuples(self._initial_state, self._final_state_name, util.num_replicas(self._name))
 
   @property
   def cost(self):
-    return self._cost
+    return self.__cost
 
   @property
-  def final_state(self):
-    return self._final_state
+  def final_state_tuples(self):
+    return util.import_state_tuples(self._final_state, self._final_state_name, util.num_replicas(self._name))
 
   @property
   def lr(self):
-    return self._lr
+    return self.__lr
 
   @property
   def train_op(self):
-    return self._train_op
+    return self.__train_op
 
 
 def run_epoch(session, model, eval_op=None, verbose=False):
@@ -254,11 +246,11 @@ def run_epoch(session, model, eval_op=None, verbose=False):
   start_time = time.time()
   costs      = 0.0
   iters      = 0
-  state      = session.run(model.initial_state)
+  state      = session.run(model.initial_state_tuples)
 
   fetches = {
       "cost"       : model.cost,
-      "final_state": model.final_state,
+      "final_state": model.final_state_tuples,
   }
 
   if eval_op is not None:
@@ -266,7 +258,7 @@ def run_epoch(session, model, eval_op=None, verbose=False):
 
   for step in range(model.input.epoch_size):
     feed_dict = {}
-    for i, (c, h) in enumerate(model.initial_state):
+    for i, (c, h) in enumerate(model.initial_state_tuples):
       feed_dict[c] = state[i].c
       feed_dict[h] = state[i].h
 

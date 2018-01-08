@@ -49,6 +49,9 @@ BASIC = "basic"
 CUDNN = "cudnn"
 BLOCK = "block"
 
+def num_replicas(set_name):
+    return FLAGS.num_gpus if set_name == "Train" else 1
+
 def export_state_tuples(state_tuples, name):
   for state_tuple in state_tuples:
     tf.add_to_collection(name, state_tuple.c)
