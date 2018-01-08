@@ -327,7 +327,7 @@ class SmallConfig(object):
   hidden_size = 200
   max_epoch = 4
   max_max_epoch = 13
-  keep_prob = 1.0
+  keep_prob = 0.5
   lr_decay = 0.5
   batch_size = 20
   vocab_size = 10000
@@ -390,6 +390,7 @@ def run_epoch(session, model, eval_op=None, verbose=False):
   start_time = time.time()
   costs = 0.0
   iters = 0
+
   state = session.run(model.initial_state)
 
   fetches = {
@@ -484,6 +485,12 @@ def main(_):
       with tf.variable_scope("Model", reuse=True, initializer=initializer):
         mtest = PTBModel(is_training=False, config=eval_config,
                          input_=test_input)
+
+    print(mvalid._input.input_data)
+    print(mvalid._input.targets)
+
+    print(m._input.input_data)
+    print(m._input.targets)
 
     models = {"Train": m, "Valid": mvalid, "Test": mtest}
     for name, model in models.items():
