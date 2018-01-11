@@ -19,8 +19,9 @@ from __future__ import print_function
 
 import tensorflow as tf
 
+from tensorflow.python.client  import device_lib
 from tensorflow.core.framework import variable_pb2
-from tensorflow.core.protobuf import rewriter_config_pb2
+from tensorflow.core.protobuf  import rewriter_config_pb2
 
 FLAGS = tf.flags.FLAGS
 
@@ -49,8 +50,76 @@ BASIC = "basic"
 CUDNN = "cudnn"
 BLOCK = "block"
 
+
+def is_soft_placement():
+  if tf.__version__ < "1.1.0" and FLAGS.num_gpus > 1:
+    raise ValueError("num_gpus > 1 is not supported for TensorFlow versions "
+                     "below 1.1.0")
+  if FLAGS.num_gpus > 1:
+    return True
+  else:
+    return False
+
+
+def state_tuples(state, name, type):
+  return import_state_tuples(
+    state,
+    with_prefix(name, type),
+    num_replicas(name))
+
+
+def initial_state_tuples(initial_state, name):
+  return state_tuples(initial_state, name, "initial")
+
+
+def final_state_tuples(final_state, name):
+  return state_tuples(final_state, name, "final")
+
+
 def num_replicas(set_name):
-    return FLAGS.num_gpus if set_name == "Train" else 1
+  return FLAGS.num_gpus if set_name == "Train" else 1
+
+
+def get_lstm_cell(config):
+  return tf.contrib.rnn.LSTMBlockCell(
+    config.hidden_size, forget_bias=0.0)
+
+
+def create_lstm_cell(is_training, config):
+  return tf.contrib.rnn.MultiRNNCell(
+    [get_maybe_dropout_cell(is_training, config) for _ in range(config.num_layers)], state_is_tuple=True)
+
+
+def get_zero_state_for_the_cell(cell, config):
+  return cell.zero_state(config.batch_size, data_type())
+
+
+def export_ops(model, config):
+  """Exports ops to collections."""
+  ops = {with_prefix(model.name, "cost"): model.cost}
+  if model.is_training:
+    ops.update(lr=model.lr, new_lr=model.new_lr, lr_update=model.lr_update)
+  for name, op in ops.items():
+    tf.add_to_collection(name, op)
+  export_state_tuples(create_zero_state_cell(model.is_training, config), model.initial_state_name)
+  export_state_tuples(model.final_state                                , model.final_state_name)
+
+
+def create_zero_state_cell(is_training, config):
+  return get_zero_state_for_the_cell(create_lstm_cell(is_training, config), config)
+
+
+def get_maybe_dropout_cell(is_training, config):
+    # Slightly better results can be obtained with forget gate biases
+    # initialized to 1 but the hyperparameters of the model would need to be
+    # different than reported in the paper.
+  cell = get_lstm_cell(config)
+  if is_training and config.keep_prob < 1:
+    return tf.contrib.rnn.DropoutWrapper(
+      cell, output_keep_prob=config.keep_prob)
+  else:
+    return cell
+
 
 def export_state_tuples(state_tuples, name):
   for state_tuple in state_tuples:
@@ -122,8 +191,14 @@ def auto_parallel(metagraph, model):
   metagraph.graph_def.CopyFrom(optimized_graph)
   UpdateCollection(metagraph, model)
 
+
+def list_gpus():
+  return [x.name for x in device_lib.list_local_devices() if x.device_type == "GPU"]
+
+
 def data_type():
   return tf.float16 if FLAGS.use_fp16 else tf.float32
+
 
 def get_config():
   """Get model config."""
