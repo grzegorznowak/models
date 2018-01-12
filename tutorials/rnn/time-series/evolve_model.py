@@ -40,8 +40,8 @@ The hyperparameters used in the model:
 - keep_prob - the probability of keeping weights in the dropout layer
 - lr_decay - the decay of the learning rate for each epoch after "max_epoch"
 - batch_size - the batch size
-- rnn_mode - the low level implementation of lstm cell: one of CUDNN,
-             BASIC, or BLOCK, representing cudnn_lstm, basic_lstm, and
+- rnn_mode - the low level implementation of lstm cell: one of
+             BASIC, or BLOCK, representing basic_lstm, and
              lstm_block_cell classes.
 
 The data required for this example is in the data/ dir of the
@@ -175,12 +175,11 @@ class PTBModel(object):
       self.new_lr      = tf.get_collection_ref("new_lr")[0]
       self.lr_update   = tf.get_collection_ref("lr_update")[0]
 
-    self.cost = tf.get_collection_ref(util.with_prefix(self.name, "cost"))[0]
-    num_replicas = util.num_replicas(self.name)
+    self.cost          = tf.get_collection_ref(util.with_prefix(self.name, "cost"))[0]
     self.initial_state = util.import_state_tuples(
-      self.initial_state, self.initial_state_name, num_replicas)
+      self.initial_state, self.initial_state_name, self.name)
     self.final_state = util.import_state_tuples(
-      self.final_state, self.final_state_name, num_replicas)
+      self.final_state, self.final_state_name, self.name)
 
   @property
   def train_op(self):
@@ -265,18 +264,17 @@ def main(_):
         mtest = PTBModel(name="Test", is_training=False, config=eval_config,
                          input_=test_input)
 
-    [(util.export_ops(model, config)) for model in [mtrain, mvalid, mtest]]
+    models = [mtrain, mvalid, mtest]
+    [(util.export_ops(model, config)) for model in models]
     metagraph = tf.train.export_meta_graph()
-    if util.is_soft_placement():
-      util.auto_parallel(metagraph, mtrain)
 
   with tf.Graph().as_default():
 
     tf.train.import_meta_graph(metagraph)
-    [(model.import_ops()) for model in [mtrain, mvalid, mtest]]
+    [(model.import_ops()) for model in models]
 
     sv           = tf.train.Supervisor(logdir=util.FLAGS.save_path)
-    config_proto = tf.ConfigProto(allow_soft_placement=util.is_soft_placement())
+    config_proto = tf.ConfigProto(allow_soft_placement=False)
     with sv.managed_session(config=config_proto) as session:
       for i in range(config.max_max_epoch):
         lr_decay = config.lr_decay ** max(i + 1 - config.max_epoch, 0.0)

@@ -42,23 +42,12 @@ flags.DEFINE_integer("num_gpus", 1,
                      "will create multiple training replicas with each GPU "
                      "running one replica.")
 flags.DEFINE_string("rnn_mode", None,
-                    "The low level implementation of lstm cell: one of CUDNN, "
-                    "BASIC, and BLOCK, representing cudnn_lstm, basic_lstm, "
+                    "The low level implementation of lstm cell: one of "
+                    "BASIC, and BLOCK, representing basic_lstm, "
                     "and lstm_block_cell classes.")
 FLAGS = flags.FLAGS
 BASIC = "basic"
-CUDNN = "cudnn"
 BLOCK = "block"
-
-
-def is_soft_placement():
-  if tf.__version__ < "1.1.0" and FLAGS.num_gpus > 1:
-    raise ValueError("num_gpus > 1 is not supported for TensorFlow versions "
-                     "below 1.1.0")
-  if FLAGS.num_gpus > 1:
-    return True
-  else:
-    return False
 
 
 def state_tuples(state, name, type):
@@ -121,17 +110,17 @@ def get_maybe_dropout_cell(is_training, config):
     return cell
 
 
-def export_state_tuples(state_tuples, name):
-  for state_tuple in state_tuples:
+def export_state_tuples(state, name):
+  for state_tuple in state:
     tf.add_to_collection(name, state_tuple.c)
     tf.add_to_collection(name, state_tuple.h)
 
 
-def import_state_tuples(state_tuples, name, num_replicas):
+def import_state_tuples(state, state_name, model_name):
   restored = []
-  for i in range(len(state_tuples) * num_replicas):
-    c = tf.get_collection_ref(name)[2 * i + 0]
-    h = tf.get_collection_ref(name)[2 * i + 1]
+  for i in range(len(state) * num_replicas(model_name)):
+    c = tf.get_collection_ref(state_name)[2 * i + 0]
+    h = tf.get_collection_ref(state_name)[2 * i + 1]
     restored.append(tf.contrib.rnn.LSTMStateTuple(c, h))
   return tuple(restored)
 
