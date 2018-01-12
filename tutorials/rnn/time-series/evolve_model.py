@@ -176,6 +176,11 @@ class PTBModel(object):
       self.lr_update   = tf.get_collection_ref("lr_update")[0]
 
     self.cost = tf.get_collection_ref(util.with_prefix(self.name, "cost"))[0]
+    num_replicas = util.num_replicas(self.name)
+    self.initial_state = util.import_state_tuples(
+      self.initial_state, self.initial_state_name, num_replicas)
+    self.final_state = util.import_state_tuples(
+      self.final_state, self.final_state_name, num_replicas)
 
   @property
   def train_op(self):
