@@ -83,7 +83,7 @@ class PTBModel(object):
 
   def __init__(self, name, is_training, config, input_):
     self.is_training = is_training
-    self.__input      = input_
+    self.input      = input_
     self._cell        = None
     self.name         = name
     self.batch_size   = input_.batch_size
@@ -147,9 +147,10 @@ class PTBModel(object):
     #
     # The alternative version of the code below is:
     #
-    # inputs = tf.unstack(inputs, num=num_steps, axis=1)
+    # inputs = tf.unstack(inputs, num=self.num_steps, axis=1)
     # outputs, state = tf.contrib.rnn.static_rnn(cell, inputs,
-    #                            initial_state=self._initial_state)
+    #                                            initial_state=self.initial_state)
+    # output = tf.reshape(tf.concat(outputs, 1), [-1, config.hidden_size])
     outputs = []
     with tf.variable_scope("RNN"):
       for time_step in range(self.num_steps):
@@ -163,17 +164,13 @@ class PTBModel(object):
   def assign_lr(self, session, lr_value):
     session.run(self.lr_update, feed_dict={self.new_lr: lr_value})
 
-  @property
-  def input(self):
-    return self.__input
-
   def import_ops(self):
     """Imports ops from collections."""
     if self.is_training:
-      self.__train_op  = tf.get_collection_ref("train_op")[0]
-      self.lr          = tf.get_collection_ref("lr")[0]
-      self.new_lr      = tf.get_collection_ref("new_lr")[0]
-      self.lr_update   = tf.get_collection_ref("lr_update")[0]
+      self.train_op  = tf.get_collection_ref("train_op")[0]
+      self.lr        = tf.get_collection_ref("lr")[0]
+      self.new_lr    = tf.get_collection_ref("new_lr")[0]
+      self.lr_update = tf.get_collection_ref("lr_update")[0]
 
     self.cost          = tf.get_collection_ref(util.with_prefix(self.name, "cost"))[0]
     self.initial_state = util.import_state_tuples(
@@ -181,9 +178,6 @@ class PTBModel(object):
     self.final_state = util.import_state_tuples(
       self.final_state, self.final_state_name, self.name)
 
-  @property
-  def train_op(self):
-    return self.__train_op
 
 
 def run_epoch(session, model, eval_op=None, verbose=False):
