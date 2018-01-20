@@ -83,17 +83,18 @@ class PTBModel(object):
 
   def __init__(self, name, is_training, config, input_):
     self.is_training = is_training
-    self.input      = input_
-    self._cell        = None
-    self.name         = name
-    self.batch_size   = input_.batch_size
-    self.num_steps    = input_.num_steps
-    size              = config.hidden_size
-    vocab_size        = config.vocab_size
+    self.input       = input_
+    self._cell       = None
+    self.name        = name
+    self.batch_size  = input_.batch_size
+    self.num_steps   = input_.num_steps
+    size             = config.hidden_size
+    vocab_size       = config.vocab_size
 
     self.initial_state_name = util.with_prefix(self.name, "initial")
     self.final_state_name   = util.with_prefix(self.name, "final")
 
+    print(input_.input_data)
     with tf.device("/cpu:0"):
       embedding = tf.get_variable(
           "embedding", [vocab_size, size], dtype=util.data_type())
@@ -124,10 +125,13 @@ class PTBModel(object):
     if not is_training:
       return
 
-    self.lr      = tf.Variable(0.0, trainable=False)
-    tvars          = tf.trainable_variables()
-    grads, _       = tf.clip_by_global_norm(tf.gradients(self.cost, tvars),
+    self.lr  = tf.Variable(0.0, trainable=False)
+    tvars    = tf.trainable_variables()
+
+    # https://stackoverflow.com/a/435619771
+    grads, _ = tf.clip_by_global_norm(tf.gradients(self.cost, tvars),
                                             config.max_grad_norm)
+
     tf.train.GradientDescentOptimizer(self.lr).apply_gradients(
       zip(grads, tvars),
       global_step=tf.train.get_or_create_global_step())
@@ -141,23 +145,10 @@ class PTBModel(object):
     state = util.get_zero_state_for_the_cell(cell, config)
 
     self.initial_state = state
-    # Simplified version of tensorflow_models/tutorials/rnn/rnn.py's rnn().
-    # This builds an unrolled LSTM for tutorial purposes only.
-    # In general, use the rnn() or state_saving_rnn() from rnn.py.
-    #
-    # The alternative version of the code below is:
-    #
-    # inputs = tf.unstack(inputs, num=self.num_steps, axis=1)
-    # outputs, state = tf.contrib.rnn.static_rnn(cell, inputs,
-    #                                            initial_state=self.initial_state)
-    # output = tf.reshape(tf.concat(outputs, 1), [-1, config.hidden_size])
-    outputs = []
     with tf.variable_scope("RNN"):
-      for time_step in range(self.num_steps):
-        if time_step > 0:
-          tf.get_variable_scope().reuse_variables()
-        (cell_output, state) = cell(inputs[:, time_step, :], state)
-        outputs.append(cell_output)
+      inputs = tf.unstack(inputs, num=self.num_steps, axis=1)
+      outputs, state = tf.contrib.rnn.static_rnn(cell, inputs,
+                                                  initial_state=self.initial_state)
     output = tf.reshape(tf.concat(outputs, 1), [-1, config.hidden_size])
     return output, state
 
@@ -167,7 +158,6 @@ class PTBModel(object):
   def import_ops(self):
     """Imports ops from collections."""
     if self.is_training:
-      self.train_op  = tf.get_collection_ref("train_op")[0]
       self.lr        = tf.get_collection_ref("lr")[0]
       self.new_lr    = tf.get_collection_ref("new_lr")[0]
       self.lr_update = tf.get_collection_ref("lr_update")[0]
@@ -179,8 +169,7 @@ class PTBModel(object):
       self.final_state, self.final_state_name, self.name)
 
 
-
-def run_epoch(session, model, eval_op=None, verbose=False):
+def run_epoch(session, model, verbose=False):
   """Runs the model on the given data."""
   start_time = time.time()
   costs      = 0.0
@@ -191,9 +180,6 @@ def run_epoch(session, model, eval_op=None, verbose=False):
       "cost"       : model.cost,
       "final_state": util.final_state_tuples(model.final_state, model.name),
   }
-
-  if eval_op is not None:
-    fetches["eval_op"] = eval_op
 
   for step in range(model.input.epoch_size):
     feed_dict = {}
@@ -275,7 +261,7 @@ def main(_):
         mtrain.assign_lr(session, config.learning_rate * lr_decay)
 
         print("Epoch: %d Learning rate: %.3f" % (i + 1, session.run(mtrain.lr)))
-        train_perplexity = run_epoch(session, mtrain, eval_op=mtrain.train_op,
+        train_perplexity = run_epoch(session, mtrain,
                                      verbose=True)
         print("Epoch: %d Train Perplexity: %.3f" % (i + 1, train_perplexity))
         valid_perplexity = run_epoch(session, mvalid)
