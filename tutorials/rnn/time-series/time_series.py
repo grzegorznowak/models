@@ -9,10 +9,10 @@ from time_series_data import get_shuffled_training_set
 
 class GraphConfig(object):
   """Large config."""
-  n_neurons     = 5
-  batch_size    = 120
+  n_neurons     = 300
+  batch_size    = 180
   n_inputs      = 6
-  n_layers      = 2
+  n_layers      = 3
   n_outputs     = 6
   learning_rate = 0.001
   keep_prob     = 0.5
@@ -63,15 +63,13 @@ def training_iteration(iteration, train_X, train_y, verify_x, verify_y, graph, s
   loss        = graph.get_tensor_by_name("loss:0")
   training_op = graph.get_operation_by_name("training_op")
   session.run(training_op, feed_dict={X: train_X, y: train_y})
-  if iteration % 100 == 0:
+  if iteration % 1000 == 0:
     mse        = loss.eval(feed_dict={X: train_X, y: train_y})
-    mse2       = loss.eval(feed_dict={X: train_X, y: train_y})
     verify_mse = loss.eval(feed_dict={X: verify_x, y: verify_y})
     merged  = tf.summary.merge_all()
     summary = session.run(merged, feed_dict={X: train_X, y: train_y})
 
     print(iteration, "\tMSE:" , mse)
-    print(iteration, "\tMSE2:", mse2)
     print(iteration, "\tVerification MSE:", verify_mse)
 
     saver.save(session, "/tmp/time_series/model_" + str(iteration) + ".ckpt")
@@ -80,17 +78,21 @@ def training_iteration(iteration, train_X, train_y, verify_x, verify_y, graph, s
 
 def prediction(graph, X_batch, y_batch):
   X           = graph.get_tensor_by_name("X:0")
+  y           = graph.get_tensor_by_name("y:0")
   outputs     = graph.get_tensor_by_name("outputs:0")
+  loss        = graph.get_tensor_by_name("loss:0")
+  mse         = loss.eval(feed_dict={X: X_batch, y: y_batch})
   print(X_batch)
   print(y_batch)
   print(outputs.eval(feed_dict={X: X_batch}))
+  print("MSE: ", mse)
 
 
 def main(_):
 
   is_training      = (sys.argv[1] == "train")
 
-  n_iterations     = 50000
+  n_iterations     = 500000
   training_config  = GraphConfig()
   tain_X, train_y, verification_X, verification_y = get_shuffled_training_set(training_config.batch_size, 20)
   epoch_size       = len(tain_X)
