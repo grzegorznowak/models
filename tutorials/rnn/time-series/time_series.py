@@ -8,7 +8,7 @@ from time_series_data import get_shuffled_training_set
 
 
 class SmallGraphConfig(object):
-  name          = "smal"
+  name          = "small"
   n_neurons     = 10
   batch_size    = 5
   n_inputs      = 6
