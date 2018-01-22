@@ -7,15 +7,27 @@ from datetime import datetime
 from time_series_data import get_shuffled_training_set
 
 
-class GraphConfig(object):
-  """Large config."""
+class SmallGraphConfig(object):
+  name          = "smal"
   n_neurons     = 10
   batch_size    = 5
   n_inputs      = 6
-  n_layers      = 2
+  n_layers      = 3
   n_outputs     = 4
-  learning_rate = 0.001
+  initial_lr    = 0.001   #initial learning rate
+  decay_lr      = 0.99
   keep_prob     = 0.9
+
+class MediumGraphConfig(object):
+  name          = "medium"
+  n_neurons     = 100
+  batch_size    = 60
+  n_inputs      = 6
+  n_layers      = 4
+  n_outputs     = 4
+  initial_lr    = 0.001   #initial learning rate
+  decay_lr      = 0.8
+  keep_prob     = 0.7
 
 
 def build_time_series_graph(graph_config, is_training):
@@ -37,6 +49,7 @@ def build_time_series_graph(graph_config, is_training):
 
     X              = tf.placeholder(tf.float32, [None, graph_config.batch_size, graph_config.n_inputs] , name="X")
     y              = tf.placeholder(tf.float32, [None, 1, graph_config.n_outputs], name="y")
+    learning_rate  = tf.placeholder(tf.float32, None, name="learning_rate")
 
     cell_layers    = [create_lstm() for _ in range(graph_config.n_layers)]
     dropout_layers = list(map(create_dropout, cell_layers))
@@ -52,7 +65,7 @@ def build_time_series_graph(graph_config, is_training):
     last_output =tf.squeeze(tf.transpose(outputs, [0, 2, 1])[:,:,4], name="last_output") # get last row - Shape of [batch_size, cell_units]
 
     loss             = tf.reduce_mean(tf.square(last_output - y), name="loss")
-    optimizer       = tf.train.MomentumOptimizer(learning_rate=graph_config.learning_rate, momentum=0.9)
+    optimizer       = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=0.9)
   #  optimizer        = tf.train.AdamOptimizer(learning_rate=graph_config.learning_rate)
     training_op      = optimizer.minimize(loss, name="training_op")
 
@@ -67,13 +80,17 @@ def build_time_series_graph(graph_config, is_training):
 
 
 def training_iteration(iteration, epoch, train_X, train_y, verify_X, verify_y, graph, session, saver, save_dir, file_writer, training_config):
-  X           = graph.get_tensor_by_name("X:0")
-  y           = graph.get_tensor_by_name("y:0")
-  keep_prob   = graph.get_tensor_by_name("keep_prob:0")
-  loss        = graph.get_tensor_by_name("loss:0")
-  output      = graph.get_tensor_by_name("last_output:0")
-  training_op = graph.get_operation_by_name("training_op")
-  session.run(training_op, feed_dict={X: train_X, y: train_y, keep_prob: training_config.keep_prob})
+  X             = graph.get_tensor_by_name("X:0")
+  y             = graph.get_tensor_by_name("y:0")
+  keep_prob     = graph.get_tensor_by_name("keep_prob:0")
+  loss          = graph.get_tensor_by_name("loss:0")
+  output        = graph.get_tensor_by_name("last_output:0")
+  learning_rate = graph.get_tensor_by_name("learning_rate:0")
+  training_op   = graph.get_operation_by_name("training_op")
+
+  current_learning_rate = training_config.initial_lr * (training_config.initial_lr**epoch)
+
+  session.run(training_op, feed_dict={X: train_X, y: train_y, keep_prob: training_config.keep_prob, learning_rate: current_learning_rate})
   if iteration % 100 == 0:
     mse        = session.run(loss, feed_dict={X: train_X, y: train_y, keep_prob: 1})
     verify_mse = session.run(loss, feed_dict={X: verify_X, y: verify_y, keep_prob: 1})
@@ -82,17 +99,16 @@ def training_iteration(iteration, epoch, train_X, train_y, verify_X, verify_y, g
     train_response  = session.run(output, feed_dict={X: train_X, keep_prob: 1})
     verify_response = session.run(output, feed_dict={X: verify_X, keep_prob: 1})
 
-    print("train_y:         ", train_y)
-    print("train_response:  ", train_response)
-    print("verify_y:        ", verify_y)
-    print("verify_response: ", verify_response)
-    print(iteration, "\tMSE:" , mse)
-    print(iteration, "\tVerification MSE:", verify_mse)
+    print("epoch: ", epoch, "iteration: ", iteration)
+    print("train_y:         "  , train_y)
+    print("train_response:  "  , train_response)
+    print("verify_y:        "  , verify_y)
+    print("verify_response: "  , verify_response)
+    print("\tMSE:"             , mse)
+    print("\tVerification MSE:", verify_mse)
 
     saver.save(session, save_dir + "model_" + str(iteration) + "_" + str(epoch) + ".ckpt")
     file_writer.add_summary(summary, iteration)
-
-
 
 
 def prediction(graph, session, X_batch, y_batch):
@@ -112,8 +128,7 @@ def main(_):
   is_training  = (sys.argv[1] == "train")
   is_continue  = (sys.argv[1] == "continue")
 
-
-  training_config  = GraphConfig()
+  training_config  = MediumGraphConfig()
   train_X, train_y, verification_X, verification_y = get_shuffled_training_set(training_config.batch_size, 5)
   epoch_size       = len(train_X) - 1
   epochs           = 10
@@ -127,7 +142,7 @@ def main(_):
 
     with training_session as sess:
       init        = tf.global_variables_initializer()
-      saver       = tf.train.Saver()
+      saver       = tf.train.Saver(max_to_keep=0)
 
       if is_continue:
         restore_name  = sys.argv[2]
@@ -137,8 +152,8 @@ def main(_):
         init.run()
 
       for epoch in range(epochs):
-        log_dir     = "{}/run-{}-{}/".format('/tmp/time_series_logdir', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch)
-        save_dir    = "{}/run-{}-{}/".format('/tmp/time_series', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch)
+        log_dir     = "{}/run-{}-{}-{}/".format('/tmp/time_series_logdir', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
+        save_dir    = "{}/run-{}-{}-{}/".format('/tmp/time_series', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
         file_writer = tf.summary.FileWriter(log_dir, tf.get_default_graph())
         list(map(
           lambda iteration: training_iteration(iteration, epoch, train_X[iteration], train_y[iteration], verification_X[0], verification_y[0], training_graph, sess, saver, save_dir, file_writer, training_config),
@@ -151,7 +166,7 @@ def main(_):
     prediction_session = tf.Session(graph=prediction_graph)
 
     with prediction_session as sess:
-      saver = tf.train.Saver()
+      saver = tf.train.Saver(max_to_keep=0)
       saver.restore(sess, restore_name)
       prediction(prediction_graph, sess, verification_X[0], verification_y[0])
 
