@@ -37,6 +37,7 @@ class TimesSeriesReaderTest(tf.test.TestCase):
 
   def testCsvReading(self):
     X, y, vX, vy = get_shuffled_training_set(5, 5)
+
     print(X[0])
     print(y[0])
 
