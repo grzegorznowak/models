@@ -20,14 +20,14 @@ class SmallGraphConfig(object):
 
 class MediumGraphConfig(object):
   name          = "medium"
-  n_neurons     = 100
-  batch_size    = 60
+  n_neurons     = 200
+  batch_size    = 20
   n_inputs      = 6
-  n_layers      = 4
+  n_layers      = 1
   n_outputs     = 4
   initial_lr    = 0.001   #initial learning rate
-  decay_lr      = 0.8
-  keep_prob     = 0.7
+  decay_lr      = 0.9
+  keep_prob     = 0.75
 
 
 def build_time_series_graph(graph_config, is_training):
@@ -37,8 +37,10 @@ def build_time_series_graph(graph_config, is_training):
 
     keep_prob      = tf.placeholder(tf.float32, None, name="keep_prob")
 
-    #create_lstm      = lambda:  tf.contrib.rnn.LSTMCell(num_units=graph_config.n_neurons, use_peepholes=True)
-    create_lstm      = lambda:  tf.contrib.rnn.LSTMCell(num_units=graph_config.n_neurons, use_peepholes=False)
+    #he_init = tf.contrib.layers.variance_scaling_initializer()
+    #create_lstm   = lambda:  tf.contrib.rnn.LSTMCell(num_units=graph_config.n_neurons, use_peepholes=True)
+    create_lstm    = lambda:  tf.nn.rnn_cell.BasicLSTMCell(
+                                  num_units=graph_config.n_neurons, activation=tf.nn.tanh)
 
     if is_training:
       # NOTE: DropoutWrapper does not support is_training flag, thus we do branching here !
@@ -58,7 +60,7 @@ def build_time_series_graph(graph_config, is_training):
     rnn_outputs, states  = tf.nn.dynamic_rnn(multi_layer_cell, X, dtype=tf.float32)
 
     stacked_rnn_outputs = tf.reshape(rnn_outputs, [-1, graph_config.n_neurons], name="stacked_rnn_outputs")
-    stacked_outputs     = tf.layers.dense(stacked_rnn_outputs, graph_config.n_outputs)
+    stacked_outputs     = tf.layers.dense(stacked_rnn_outputs, graph_config.n_outputs, name="stacked_outputs")
     outputs             = tf.reshape(stacked_outputs,
                                      [-1, graph_config.batch_size, graph_config.n_outputs],
                                      name="outputs")

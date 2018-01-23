@@ -17,7 +17,7 @@ def get_shuffled_training_set(batch_size, verification_batches):
   return X_train_batches_shuffled, y_train_batches_shuffled, X_verify_batches_shuffled, y_verify_batches_shuffled
 
 def get_data_batches(batch_size, verification_batches):
-  raw_data = pd.read_csv(os.path.join("/home/grzegorz/workspace/mql-csv-export/Data/", "mt4_EURUSD_1M_range_1_OHCLT_train_data.csv"))
+  raw_data = pd.read_csv(os.path.join("/mnt/c/Users/grzegorz/workspace/mql-csv-export/Data/", "mt4_EURUSD_1_range_1_UNnormalized_OHCLT_train_data.csv"))
   verification_size = verification_batches + batch_size + 20
 
   training_seq     = np.array(raw_data[verification_size:])
