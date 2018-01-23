@@ -11,7 +11,7 @@ class SmallGraphConfig(object):
   name          = "small"
   n_neurons     = 10
   batch_size    = 5
-  n_inputs      = 6
+  n_inputs      = 6  # assumes datetime entry is present
   n_layers      = 3
   n_outputs     = 4
   initial_lr    = 0.001   #initial learning rate
@@ -19,47 +19,52 @@ class SmallGraphConfig(object):
   keep_prob     = 0.9
 
 class MediumGraphConfig(object):
-  name          = "medium"
-  n_neurons     = 200
-  batch_size    = 20
-  n_inputs      = 6
-  n_layers      = 1
-  n_outputs     = 4
-  initial_lr    = 0.001   #initial learning rate
-  decay_lr      = 0.9
-  keep_prob     = 0.75
+  name           = "medium"
+  lstm_neurons   = 2
+  batch_size     = 10
+  lstm_layers    = 1
+  hidden_layers  = 3   # this is not automated still
+  hidden_neurons = 10
+  n_outputs      = 3
+  n_inputs       = 4
+  initial_lr     = 0.001   #initial learning rate
+  decay_lr       = 0.9
+  keep_prob      = 0.7     # droput only on LTSM layer
 
 
-def build_time_series_graph(graph_config, is_training):
+def build_time_series_graph(graph_config):
 
   graph = tf.Graph()
   with graph.as_default():
 
     keep_prob      = tf.placeholder(tf.float32, None, name="keep_prob")
+    he_init        = tf.contrib.layers.variance_scaling_initializer()
 
     #he_init = tf.contrib.layers.variance_scaling_initializer()
-    #create_lstm   = lambda:  tf.contrib.rnn.LSTMCell(num_units=graph_config.n_neurons, use_peepholes=True)
-    create_lstm    = lambda:  tf.nn.rnn_cell.BasicLSTMCell(
-                                  num_units=graph_config.n_neurons, activation=tf.nn.tanh)
+    create_lstm   = lambda:  tf.contrib.rnn.LSTMCell(num_units=graph_config.lstm_neurons, use_peepholes=True, activation=None) #tf.nn.relu
+    #create_lstm    = lambda:  tf.nn.rnn_cell.LSTMCell(
+    #                              num_units=graph_config.n_neurons, activation=tf.nn.relu)
 
-    if is_training:
-      # NOTE: DropoutWrapper does not support is_training flag, thus we do branching here !
-      create_dropout = lambda cell: tf.contrib.rnn.DropoutWrapper(cell, input_keep_prob=keep_prob)
-    else:
-      # just identity function if not training -> no extra layers added
-      create_dropout = lambda x: x
+    create_dropout = lambda cell: tf.contrib.rnn.DropoutWrapper(cell, input_keep_prob=keep_prob)
 
     X              = tf.placeholder(tf.float32, [None, graph_config.batch_size, graph_config.n_inputs] , name="X")
     y              = tf.placeholder(tf.float32, [None, 1, graph_config.n_outputs], name="y")
     learning_rate  = tf.placeholder(tf.float32, None, name="learning_rate")
 
-    cell_layers    = [create_lstm() for _ in range(graph_config.n_layers)]
+    hidden1        = tf.layers.dense(inputs=X      , units=graph_config.hidden_neurons, activation=None, kernel_initializer=he_init)
+    hidden2        = tf.layers.dense(inputs=hidden1, units=graph_config.hidden_neurons, activation=None, kernel_initializer=he_init)
+    hidden3        = tf.layers.dense(inputs=hidden2, units=graph_config.hidden_neurons, activation=None, kernel_initializer=he_init, name="hidden3")
+
+    cell_layers    = [create_lstm() for _ in range(graph_config.lstm_layers)]
     dropout_layers = list(map(create_dropout, cell_layers))
 
     multi_layer_cell     = tf.contrib.rnn.MultiRNNCell(dropout_layers)
-    rnn_outputs, states  = tf.nn.dynamic_rnn(multi_layer_cell, X, dtype=tf.float32)
+    rnn_outputs, states  = tf.nn.dynamic_rnn(multi_layer_cell, hidden3, dtype=tf.float32)
+  #  hidden_out1          = tf.layers.dense(inputs=rnn_outputs, units=graph_config.n_neurons, activation=None, kernel_initializer=he_init)
+  #  dense2                = tf.layers.dense(inputs=dense1, units=graph_config.n_neurons, activation=None, kernel_initializer=he_init)
+ #   dense3                = tf.layers.dense(inputs=dense2, units=graph_config.n_neurons, activation=None, kernel_initializer=he_init)
 
-    stacked_rnn_outputs = tf.reshape(rnn_outputs, [-1, graph_config.n_neurons], name="stacked_rnn_outputs")
+    stacked_rnn_outputs = tf.reshape(rnn_outputs, [-1, graph_config.lstm_neurons], name="stacked_rnn_outputs")
     stacked_outputs     = tf.layers.dense(stacked_rnn_outputs, graph_config.n_outputs, name="stacked_outputs")
     outputs             = tf.reshape(stacked_outputs,
                                      [-1, graph_config.batch_size, graph_config.n_outputs],
@@ -67,14 +72,18 @@ def build_time_series_graph(graph_config, is_training):
     last_output =tf.squeeze(tf.transpose(outputs, [0, 2, 1])[:,:,4], name="last_output") # get last row - Shape of [batch_size, cell_units]
 
     loss             = tf.reduce_mean(tf.square(last_output - y), name="loss")
-    optimizer       = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=0.9)
-  #  optimizer        = tf.train.AdamOptimizer(learning_rate=graph_config.learning_rate)
+  #  optimizer       = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=0.9)
+    optimizer        = tf.train.AdamOptimizer(learning_rate=learning_rate)
+  #  optimizer        = tf.train.RMSPropOptimizer(learning_rate)
     training_op      = optimizer.minimize(loss, name="training_op")
 
     # logging nodes
     mse_summary      = tf.summary.scalar("mse_summary", loss)
-
-
+    tf.summary.histogram("weights_hidden1", hidden1)
+    tf.summary.histogram("weights_hidden2", hidden2)
+    tf.summary.histogram("weights_hidden3", hidden3)
+ #  tf.summary.histogram("hidden_out1", hidden_out1)
+    tf.summary.histogram("stacked_outputs", stacked_outputs)
 
 
 
@@ -93,19 +102,21 @@ def training_iteration(iteration, epoch, train_X, train_y, verify_X, verify_y, g
   current_learning_rate = training_config.initial_lr * (training_config.initial_lr**epoch)
 
   session.run(training_op, feed_dict={X: train_X, y: train_y, keep_prob: training_config.keep_prob, learning_rate: current_learning_rate})
-  if iteration % 100 == 0:
+  if iteration % 1000 == 0:
     mse        = session.run(loss, feed_dict={X: train_X, y: train_y, keep_prob: 1})
     verify_mse = session.run(loss, feed_dict={X: verify_X, y: verify_y, keep_prob: 1})
     merged     = tf.summary.merge_all()
     summary    = session.run(merged, feed_dict={X: train_X, y: train_y, keep_prob: 1})
     train_response  = session.run(output, feed_dict={X: train_X, keep_prob: 1})
     verify_response = session.run(output, feed_dict={X: verify_X, keep_prob: 1})
+    train_X = session.run(X, feed_dict={X: train_X, keep_prob: 1})
 
     print("epoch: ", epoch, "iteration: ", iteration)
     print("train_y:         "  , train_y)
     print("train_response:  "  , train_response)
     print("verify_y:        "  , verify_y)
     print("verify_response: "  , verify_response)
+    print(train_X)
     print("\tMSE:"             , mse)
     print("\tVerification MSE:", verify_mse)
 
@@ -133,10 +144,10 @@ def main(_):
   training_config  = MediumGraphConfig()
   train_X, train_y, verification_X, verification_y = get_shuffled_training_set(training_config.batch_size, 5)
   epoch_size       = len(train_X) - 1
-  epochs           = 10
+  epochs           = 500
 
   if is_training:
-    training_graph   = build_time_series_graph(training_config, is_training=True)
+    training_graph   = build_time_series_graph(training_config)
     training_session = tf.Session(graph=training_graph)
     n_iterations     = epoch_size * epochs
     print("Training with train set len of: ", n_iterations, " iterations")
@@ -164,9 +175,9 @@ def main(_):
 
   else:
     restore_name = sys.argv[1]
-    prediction_graph   = build_time_series_graph(GraphConfig(), is_training=False)
+    prediction_graph   = build_time_series_graph(GraphConfig())
     prediction_session = tf.Session(graph=prediction_graph)
-
+# @TODO pass the proper dorput rate1
     with prediction_session as sess:
       saver = tf.train.Saver(max_to_keep=0)
       saver.restore(sess, restore_name)
