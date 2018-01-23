@@ -20,16 +20,48 @@ class SmallGraphConfig(object):
 
 class MediumGraphConfig(object):
   name           = "medium"
-  lstm_neurons   = 2
-  batch_size     = 10
-  lstm_layers    = 1
+  rnn_neurons    = 500
+  batch_size     = 20
+  rnn_layers     = 2
   hidden_layers  = 3   # this is not automated still
   hidden_neurons = 10
   n_outputs      = 3
   n_inputs       = 4
   initial_lr     = 0.001   #initial learning rate
   decay_lr       = 0.9
-  keep_prob      = 0.7     # droput only on LTSM layer
+  keep_prob      = 0.5     # droput only on RNN layer(s)
+
+def build_rnn_time_series_graph(graph_config):
+
+  graph = tf.Graph();
+  with graph.as_default():
+    keep_prob      = tf.placeholder(tf.float32, None, name="keep_prob")
+    he_init        = tf.contrib.layers.variance_scaling_initializer()
+
+    X              = tf.placeholder(tf.float32, [None, graph_config.batch_size, graph_config.n_inputs] , name="X")
+    y              = tf.placeholder(tf.float32, [None, 1, graph_config.n_outputs], name="y")
+    learning_rate  = tf.placeholder(tf.float32, None, name="learning_rate")
+
+    hidden_in      = tf.layers.dense(inputs=X      , units=graph_config.hidden_neurons, activation=tf.nn.relu, kernel_initializer=he_init)
+  #  basic_cell     = tf.contrib.rnn.BasicRNNCell(num_units=graph_config.rnn_neurons)
+    basic_cell     = tf.contrib.rnn.GRUCell(num_units=graph_config.rnn_neurons, activation=tf.nn.relu)
+
+    dropout_layers = tf.contrib.rnn.DropoutWrapper(basic_cell, input_keep_prob=keep_prob)
+
+    outputs, states = tf.nn.dynamic_rnn(dropout_layers, hidden_in, dtype=tf.float32)
+
+    output         = tf.layers.dense(states, graph_config.n_outputs)
+
+    loss           = tf.reduce_mean(tf.square(output - y), name="loss")
+    optimizer      = tf.train.AdamOptimizer(learning_rate=learning_rate)
+    training_op    = optimizer.minimize(loss, name="training_op")
+
+    last_output    = tf.transpose(tf.transpose(output), name="last_output") # get last row - Shape of [batch_size, cell_units]
+    mse_summary    = tf.summary.scalar("mse_summary", loss)
+    tf.summary.histogram("weights_output", output)
+    tf.summary.histogram("hidden_in", hidden_in)
+
+  return graph
 
 
 def build_time_series_graph(graph_config):
@@ -41,7 +73,7 @@ def build_time_series_graph(graph_config):
     he_init        = tf.contrib.layers.variance_scaling_initializer()
 
     #he_init = tf.contrib.layers.variance_scaling_initializer()
-    create_lstm   = lambda:  tf.contrib.rnn.LSTMCell(num_units=graph_config.lstm_neurons, use_peepholes=True, activation=None) #tf.nn.relu
+    create_lstm   = lambda:  tf.contrib.rnn.LSTMCell(num_units=graph_config.rnn_neurons, use_peepholes=True, activation=tf.nn.relu) #tf.nn.relu
     #create_lstm    = lambda:  tf.nn.rnn_cell.LSTMCell(
     #                              num_units=graph_config.n_neurons, activation=tf.nn.relu)
 
@@ -51,11 +83,11 @@ def build_time_series_graph(graph_config):
     y              = tf.placeholder(tf.float32, [None, 1, graph_config.n_outputs], name="y")
     learning_rate  = tf.placeholder(tf.float32, None, name="learning_rate")
 
-    hidden1        = tf.layers.dense(inputs=X      , units=graph_config.hidden_neurons, activation=None, kernel_initializer=he_init)
-    hidden2        = tf.layers.dense(inputs=hidden1, units=graph_config.hidden_neurons, activation=None, kernel_initializer=he_init)
+    hidden1        = tf.layers.dense(inputs=X      , units=graph_config.hidden_neurons, activation=tf.nn.relu, kernel_initializer=he_init)
+    hidden2        = tf.layers.dense(inputs=hidden1, units=graph_config.hidden_neurons, activation=tf.nn.relu, kernel_initializer=he_init)
     hidden3        = tf.layers.dense(inputs=hidden2, units=graph_config.hidden_neurons, activation=None, kernel_initializer=he_init, name="hidden3")
 
-    cell_layers    = [create_lstm() for _ in range(graph_config.lstm_layers)]
+    cell_layers    = [create_lstm() for _ in range(graph_config.rnn_layers)]
     dropout_layers = list(map(create_dropout, cell_layers))
 
     multi_layer_cell     = tf.contrib.rnn.MultiRNNCell(dropout_layers)
@@ -64,11 +96,12 @@ def build_time_series_graph(graph_config):
   #  dense2                = tf.layers.dense(inputs=dense1, units=graph_config.n_neurons, activation=None, kernel_initializer=he_init)
  #   dense3                = tf.layers.dense(inputs=dense2, units=graph_config.n_neurons, activation=None, kernel_initializer=he_init)
 
-    stacked_rnn_outputs = tf.reshape(rnn_outputs, [-1, graph_config.lstm_neurons], name="stacked_rnn_outputs")
-    stacked_outputs     = tf.layers.dense(stacked_rnn_outputs, graph_config.n_outputs, name="stacked_outputs")
-    outputs             = tf.reshape(stacked_outputs,
-                                     [-1, graph_config.batch_size, graph_config.n_outputs],
-                                     name="outputs")
+    last_output          = tf.layers.dense(states, graph_config.n_outputs)
+    #stacked_rnn_outputs = tf.reshape(rnn_outputs, [-1, graph_config.rnn_neurons], name="stacked_rnn_outputs")
+    #stacked_outputs     = tf.layers.dense(stacked_rnn_outputs, graph_config.n_outputs, name="stacked_outputs")
+    #outputs             = tf.reshape(stacked_outputs,
+    #                                 [-1, graph_config.batch_size, graph_config.n_outputs],
+    #                                 name="outputs")
     last_output =tf.squeeze(tf.transpose(outputs, [0, 2, 1])[:,:,4], name="last_output") # get last row - Shape of [batch_size, cell_units]
 
     loss             = tf.reduce_mean(tf.square(last_output - y), name="loss")
@@ -116,7 +149,6 @@ def training_iteration(iteration, epoch, train_X, train_y, verify_X, verify_y, g
     print("train_response:  "  , train_response)
     print("verify_y:        "  , verify_y)
     print("verify_response: "  , verify_response)
-    print(train_X)
     print("\tMSE:"             , mse)
     print("\tVerification MSE:", verify_mse)
 
@@ -147,7 +179,7 @@ def main(_):
   epochs           = 500
 
   if is_training:
-    training_graph   = build_time_series_graph(training_config)
+    training_graph   = build_rnn_time_series_graph(training_config)
     training_session = tf.Session(graph=training_graph)
     n_iterations     = epoch_size * epochs
     print("Training with train set len of: ", n_iterations, " iterations")
