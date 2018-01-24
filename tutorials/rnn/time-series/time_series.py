@@ -40,8 +40,8 @@ class MediumBigGraphConfig(object):
   hidden_neurons = 10
   n_outputs      = 3
   n_inputs       = 4
-  initial_lr     = 0.002   #initial learning rate
-  decay_lr       = 0.8
+  initial_lr     = 0.0001   #initial learning rate
+  decay_lr       = 0.9
   keep_prob      = 0.5     # droput only on RNN layer(s)
 
 def build_rnn_time_series_graph(graph_config):
@@ -57,13 +57,13 @@ def build_rnn_time_series_graph(graph_config):
 
   #  hidden_in      = tf.layers.dense(inputs=X      , units=graph_config.hidden_neurons, activation=tf.nn.relu, kernel_initializer=he_init)
   #  basic_cell     = tf.contrib.rnn.BasicRNNCell(num_units=graph_config.rnn_neurons)
-    basic_cell1     = tf.contrib.rnn.GRUCell(num_units=graph_config.rnn_neurons, activation=tf.nn.relu) # alternative activation=tf.nn.relu
-    basic_cell2     = tf.contrib.rnn.GRUCell(num_units=graph_config.rnn_neurons, activation=tf.nn.relu) # alternative activation=tf.nn.relu
+    basic_cell1     = tf.contrib.rnn.GRUCell(num_units=graph_config.rnn_neurons, activation=tf.nn.elu) # alternative activation=tf.nn.relu
+    basic_cell2     = tf.contrib.rnn.GRUCell(num_units=graph_config.rnn_neurons, activation=tf.nn.elu) # alternative activation=tf.nn.relu
 
     dropout_layers  = tf.contrib.rnn.DropoutWrapper(basic_cell1, input_keep_prob=keep_prob)
     dropout_layers2 = tf.contrib.rnn.DropoutWrapper(basic_cell2, input_keep_prob=keep_prob)
 
-    multi_layer_cell     = tf.contrib.rnn.MultiRNNCell([dropout_layers, dropout_layers2])
+    multi_layer_cell     = tf.contrib.rnn.MultiRNNCell([dropout_layers, dropout_layers2], state_is_tuple=False)
     outputs1, states1    = tf.nn.dynamic_rnn(multi_layer_cell, X, dtype=tf.float32)
 #    _, last_state = tf.split(0, 2, states1)
   #  last_state           = tf.slice(states1, [1, 0, 0], [2, 1, 3])
@@ -73,22 +73,23 @@ def build_rnn_time_series_graph(graph_config):
  #   print(states1)
 
     # double the output layers to unbound outputs
-    output          = tf.layers.dense(states1[1], graph_config.n_outputs)
-    output2         = tf.layers.dense(output, graph_config.n_outputs)
+    output         = tf.layers.dense(states1, graph_config.n_outputs, kernel_initializer=he_init)
+ #   output2        = tf.layers.dense(output, graph_config.n_outputs, kernel_initializer=he_init)
 
-    loss           = tf.reduce_mean(tf.square(output2 - y), name="loss")
+    loss           = tf.reduce_mean(tf.square(output - y), name="loss")
     optimizer      = tf.train.AdamOptimizer(learning_rate=learning_rate)
 
     gvs = optimizer.compute_gradients(loss)
-    capped_gvs = [(tf.clip_by_value(grad, -1000., 1000.), var) for grad, var in gvs]
+    capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs]
     training_op = optimizer.apply_gradients(capped_gvs, name="training_op")
 
  #   training_op    = optimizer.minimize(loss, name="training_op")
 
-    last_output    = tf.transpose(tf.transpose(output2), name="last_output") # get last row - Shape of [batch_size, cell_units]
+    last_output    = tf.transpose(tf.transpose(output), name="last_output") # get last row - Shape of [batch_size, cell_units]
     mse_summary    = tf.summary.scalar("mse_summary", loss)
     tf.summary.histogram("weights_output", output)
-    tf.summary.histogram("weights_output2", output2)
+    #tf.summary.histogram("weights_output2", output2)
+    tf.summary.histogram("states1", states1)
  #   tf.summary.histogram("hidden_in", hidden_in)
 
   return graph
