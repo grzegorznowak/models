@@ -33,14 +33,14 @@ class MediumGraphConfig(object):
 
 class MediumBigGraphConfig(object):
   name           = "medium-big"
-  rnn_neurons    = 400
-  batch_size     = 240
+  rnn_neurons    = 40
+  batch_size     = 320
   rnn_layers     = 2
   hidden_layers  = 3   # this is not automated still
   hidden_neurons = 10
   n_outputs      = 3
   n_inputs       = 4
-  initial_lr     = 0.002   #initial learning rate
+  initial_lr     = 0.001   #initial learning rate
   decay_lr       = 0.8
   keep_prob      = 0.5     # droput only on RNN layer(s)
 
@@ -57,13 +57,16 @@ def build_rnn_time_series_graph(graph_config):
 
   #  hidden_in      = tf.layers.dense(inputs=X      , units=graph_config.hidden_neurons, activation=tf.nn.relu, kernel_initializer=he_init)
   #  basic_cell     = tf.contrib.rnn.BasicRNNCell(num_units=graph_config.rnn_neurons)
-    basic_cell     = tf.contrib.rnn.GRUCell(num_units=graph_config.rnn_neurons) # alternative activation=tf.nn.relu
+    basic_cell1     = tf.contrib.rnn.GRUCell(num_units=graph_config.rnn_neurons, activation=tf.nn.relu) # alternative activation=tf.nn.relu
+ #   basic_cell2     = tf.contrib.rnn.GRUCell(num_units=graph_config.rnn_neurons, activation=tf.nn.relu) # alternative activation=tf.nn.relu
 
-    dropout_layers = tf.contrib.rnn.DropoutWrapper(basic_cell, input_keep_prob=keep_prob)
+    dropout_layers = tf.contrib.rnn.DropoutWrapper(basic_cell1, input_keep_prob=keep_prob)
+  #  dropout_layers2 = tf.contrib.rnn.DropoutWrapper(basic_cell2, input_keep_prob=keep_prob)
 
-    outputs, states = tf.nn.dynamic_rnn(dropout_layers, X, dtype=tf.float32)
+    outputs1, states1 = tf.nn.dynamic_rnn(dropout_layers, X, dtype=tf.float32)
+   # outputs2, states2 = tf.nn.dynamic_rnn(dropout_layers2, outputs1, dtype=tf.float32)
 
-    output         = tf.layers.dense(states, graph_config.n_outputs)
+    output         = tf.layers.dense(states1, graph_config.n_outputs)
 
     loss           = tf.reduce_mean(tf.square(output - y), name="loss")
     optimizer      = tf.train.AdamOptimizer(learning_rate=learning_rate)
@@ -187,20 +190,16 @@ def main(_):
   is_continue  = (sys.argv[1] == "continue")
 
   training_config  = MediumBigGraphConfig()
-  train_X, train_y, verification_X, verification_y = get_shuffled_training_set(training_config.batch_size, 5)
-  epoch_size       = len(train_X) - 1
-  epochs           = 500
 
   if is_training:
     training_graph   = build_rnn_time_series_graph(training_config)
     training_session = tf.Session(graph=training_graph)
-    n_iterations     = epoch_size * epochs
-    print("Training with train set len of: ", n_iterations, " iterations")
+    epochs           = 500
 
 
     with training_session as sess:
-      init        = tf.global_variables_initializer()
-      saver       = tf.train.Saver(max_to_keep=0)
+      init  = tf.global_variables_initializer()
+      saver = tf.train.Saver(max_to_keep=0)
 
       if is_continue:
         restore_name  = sys.argv[2]
@@ -210,6 +209,10 @@ def main(_):
         init.run()
 
       for epoch in range(epochs):
+        train_X, train_y, verification_X, verification_y = get_shuffled_training_set(training_config.batch_size, 5)
+        epoch_size  = len(train_X) - 1
+
+        print("Training ", epoch, "epoch, with train set len of: ", epoch_size, " iterations")
         log_dir     = "{}/run-{}-{}-{}/".format('/tmp/time_series_logdir', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
         save_dir    = "{}/run-{}-{}-{}/".format('/tmp/time_series', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
         file_writer = tf.summary.FileWriter(log_dir, tf.get_default_graph())
