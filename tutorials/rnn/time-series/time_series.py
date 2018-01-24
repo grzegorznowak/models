@@ -70,7 +70,12 @@ def build_rnn_time_series_graph(graph_config):
 
     loss           = tf.reduce_mean(tf.square(output - y), name="loss")
     optimizer      = tf.train.AdamOptimizer(learning_rate=learning_rate)
-    training_op    = optimizer.minimize(loss, name="training_op")
+
+    gvs = optimizer.compute_gradients(loss)
+    capped_gvs = [(tf.clip_by_value(grad, -1000., 1000.), var) for grad, var in gvs]
+    training_op = optimizer.apply_gradients(capped_gvs, name="training_op")
+
+ #   training_op    = optimizer.minimize(loss, name="training_op")
 
     last_output    = tf.transpose(tf.transpose(output), name="last_output") # get last row - Shape of [batch_size, cell_units]
     mse_summary    = tf.summary.scalar("mse_summary", loss)
