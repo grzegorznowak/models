@@ -34,13 +34,13 @@ class MediumGraphConfig(object):
 class MediumBigGraphConfig(object):
   name           = "medium-big"
   rnn_neurons    = 40
-  batch_size     = 320
+  batch_size     = 400
   rnn_layers     = 2
   hidden_layers  = 3   # this is not automated still
   hidden_neurons = 10
   n_outputs      = 3
   n_inputs       = 4
-  initial_lr     = 0.001   #initial learning rate
+  initial_lr     = 0.002   #initial learning rate
   decay_lr       = 0.8
   keep_prob      = 0.5     # droput only on RNN layer(s)
 
@@ -58,17 +58,25 @@ def build_rnn_time_series_graph(graph_config):
   #  hidden_in      = tf.layers.dense(inputs=X      , units=graph_config.hidden_neurons, activation=tf.nn.relu, kernel_initializer=he_init)
   #  basic_cell     = tf.contrib.rnn.BasicRNNCell(num_units=graph_config.rnn_neurons)
     basic_cell1     = tf.contrib.rnn.GRUCell(num_units=graph_config.rnn_neurons, activation=tf.nn.relu) # alternative activation=tf.nn.relu
- #   basic_cell2     = tf.contrib.rnn.GRUCell(num_units=graph_config.rnn_neurons, activation=tf.nn.relu) # alternative activation=tf.nn.relu
+    basic_cell2     = tf.contrib.rnn.GRUCell(num_units=graph_config.rnn_neurons, activation=tf.nn.relu) # alternative activation=tf.nn.relu
 
-    dropout_layers = tf.contrib.rnn.DropoutWrapper(basic_cell1, input_keep_prob=keep_prob)
-  #  dropout_layers2 = tf.contrib.rnn.DropoutWrapper(basic_cell2, input_keep_prob=keep_prob)
+    dropout_layers  = tf.contrib.rnn.DropoutWrapper(basic_cell1, input_keep_prob=keep_prob)
+    dropout_layers2 = tf.contrib.rnn.DropoutWrapper(basic_cell2, input_keep_prob=keep_prob)
 
-    outputs1, states1 = tf.nn.dynamic_rnn(dropout_layers, X, dtype=tf.float32)
-   # outputs2, states2 = tf.nn.dynamic_rnn(dropout_layers2, outputs1, dtype=tf.float32)
+    multi_layer_cell     = tf.contrib.rnn.MultiRNNCell([dropout_layers, dropout_layers2])
+    outputs1, states1    = tf.nn.dynamic_rnn(multi_layer_cell, X, dtype=tf.float32)
+#    _, last_state = tf.split(0, 2, states1)
+  #  last_state           = tf.slice(states1, [1, 0, 0], [2, 1, 3])
+  #  last_state           = tf.squeeze(tf.transpose(states1)[:,:,4], name="last_output")
+  #  outputs2, states2 = tf.nn.dynamic_rnn(dropout_layers2, outputs1, dtype=tf.float32, initial_state=states1)
+ #   print(last_state)
+ #   print(states1)
 
-    output         = tf.layers.dense(states1, graph_config.n_outputs)
+    # double the output layers to unbound outputs
+    output          = tf.layers.dense(states1[1], graph_config.n_outputs)
+    output2         = tf.layers.dense(output, graph_config.n_outputs)
 
-    loss           = tf.reduce_mean(tf.square(output - y), name="loss")
+    loss           = tf.reduce_mean(tf.square(output2 - y), name="loss")
     optimizer      = tf.train.AdamOptimizer(learning_rate=learning_rate)
 
     gvs = optimizer.compute_gradients(loss)
@@ -77,9 +85,10 @@ def build_rnn_time_series_graph(graph_config):
 
  #   training_op    = optimizer.minimize(loss, name="training_op")
 
-    last_output    = tf.transpose(tf.transpose(output), name="last_output") # get last row - Shape of [batch_size, cell_units]
+    last_output    = tf.transpose(tf.transpose(output2), name="last_output") # get last row - Shape of [batch_size, cell_units]
     mse_summary    = tf.summary.scalar("mse_summary", loss)
     tf.summary.histogram("weights_output", output)
+    tf.summary.histogram("weights_output2", output2)
  #   tf.summary.histogram("hidden_in", hidden_in)
 
   return graph
@@ -156,14 +165,13 @@ def training_iteration(iteration, epoch, train_X, train_y, verify_X, verify_y, g
   current_learning_rate = training_config.initial_lr * (training_config.initial_lr**epoch)
 
   session.run(training_op, feed_dict={X: train_X, y: train_y, keep_prob: training_config.keep_prob, learning_rate: current_learning_rate})
-  if iteration % 1000 == 0:
+  if iteration % 100 == 0:
     mse        = session.run(loss, feed_dict={X: train_X, y: train_y, keep_prob: 1})
     verify_mse = session.run(loss, feed_dict={X: verify_X, y: verify_y, keep_prob: 1})
     merged     = tf.summary.merge_all()
     summary    = session.run(merged, feed_dict={X: train_X, y: train_y, keep_prob: 1})
     train_response  = session.run(output, feed_dict={X: train_X, keep_prob: 1})
     verify_response = session.run(output, feed_dict={X: verify_X, keep_prob: 1})
-    train_X = session.run(X, feed_dict={X: train_X, keep_prob: 1})
 
     print("epoch: ", epoch, "iteration: ", iteration)
     print("train_y:         "  , train_y)
@@ -173,6 +181,7 @@ def training_iteration(iteration, epoch, train_X, train_y, verify_X, verify_y, g
     print("\tMSE:"             , mse)
     print("\tVerification MSE:", verify_mse)
 
+  if iteration % 1000 == 0:  # save network rarily
     saver.save(session, save_dir + "model_" + str(iteration) + "_" + str(epoch) + ".ckpt")
     file_writer.add_summary(summary, iteration)
 
