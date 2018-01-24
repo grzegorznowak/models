@@ -20,8 +20,8 @@ class SmallGraphConfig(object):
 
 class MediumGraphConfig(object):
   name           = "medium"
-  rnn_neurons    = 500
-  batch_size     = 20
+  rnn_neurons    = 200
+  batch_size     = 60
   rnn_layers     = 2
   hidden_layers  = 3   # this is not automated still
   hidden_neurons = 10
@@ -29,6 +29,19 @@ class MediumGraphConfig(object):
   n_inputs       = 4
   initial_lr     = 0.001   #initial learning rate
   decay_lr       = 0.9
+  keep_prob      = 0.5     # droput only on RNN layer(s)
+
+class MediumBigGraphConfig(object):
+  name           = "medium-big"
+  rnn_neurons    = 400
+  batch_size     = 240
+  rnn_layers     = 2
+  hidden_layers  = 3   # this is not automated still
+  hidden_neurons = 10
+  n_outputs      = 3
+  n_inputs       = 4
+  initial_lr     = 0.002   #initial learning rate
+  decay_lr       = 0.8
   keep_prob      = 0.5     # droput only on RNN layer(s)
 
 def build_rnn_time_series_graph(graph_config):
@@ -42,13 +55,13 @@ def build_rnn_time_series_graph(graph_config):
     y              = tf.placeholder(tf.float32, [None, 1, graph_config.n_outputs], name="y")
     learning_rate  = tf.placeholder(tf.float32, None, name="learning_rate")
 
-    hidden_in      = tf.layers.dense(inputs=X      , units=graph_config.hidden_neurons, activation=tf.nn.relu, kernel_initializer=he_init)
+  #  hidden_in      = tf.layers.dense(inputs=X      , units=graph_config.hidden_neurons, activation=tf.nn.relu, kernel_initializer=he_init)
   #  basic_cell     = tf.contrib.rnn.BasicRNNCell(num_units=graph_config.rnn_neurons)
-    basic_cell     = tf.contrib.rnn.GRUCell(num_units=graph_config.rnn_neurons, activation=tf.nn.relu)
+    basic_cell     = tf.contrib.rnn.GRUCell(num_units=graph_config.rnn_neurons) # alternative activation=tf.nn.relu
 
     dropout_layers = tf.contrib.rnn.DropoutWrapper(basic_cell, input_keep_prob=keep_prob)
 
-    outputs, states = tf.nn.dynamic_rnn(dropout_layers, hidden_in, dtype=tf.float32)
+    outputs, states = tf.nn.dynamic_rnn(dropout_layers, X, dtype=tf.float32)
 
     output         = tf.layers.dense(states, graph_config.n_outputs)
 
@@ -59,7 +72,7 @@ def build_rnn_time_series_graph(graph_config):
     last_output    = tf.transpose(tf.transpose(output), name="last_output") # get last row - Shape of [batch_size, cell_units]
     mse_summary    = tf.summary.scalar("mse_summary", loss)
     tf.summary.histogram("weights_output", output)
-    tf.summary.histogram("hidden_in", hidden_in)
+ #   tf.summary.histogram("hidden_in", hidden_in)
 
   return graph
 
@@ -173,7 +186,7 @@ def main(_):
   is_training  = (sys.argv[1] == "train")
   is_continue  = (sys.argv[1] == "continue")
 
-  training_config  = MediumGraphConfig()
+  training_config  = MediumBigGraphConfig()
   train_X, train_y, verification_X, verification_y = get_shuffled_training_set(training_config.batch_size, 5)
   epoch_size       = len(train_X) - 1
   epochs           = 500
