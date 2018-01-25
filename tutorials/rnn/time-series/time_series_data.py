@@ -3,22 +3,26 @@ import os
 import random
 import numpy as np
 
-def get_shuffled_training_set(batch_size, verification_batches):
-  X_train_batches, y_train_batches, X_verify_bacthes, y_verify_batches = get_data_batches(batch_size, verification_batches)
-  train_batches = list(zip(X_train_batches, y_train_batches))
-  random.shuffle(train_batches)
-  verification_batches = list(zip(X_verify_bacthes, y_verify_batches))
-  random.shuffle(verification_batches)
+data_file = os.path.join("/mnt/c/Users/grzegorz/workspace/mql-csv-export/Data/", "test_mt4_EURUSD_1_range_1_UNnormalized_NOdatetime_OHCLT_train_data.csv")
+data_folder = os.path.join("/mnt/c/Users/grzegorz/AppData/Roaming/MetaQuotes/Terminal/3BD2B5E5A5264AFE17C1E2DDC7D6B381/tester/files/mt4_EURUSD_1__range_1_UNnormalized_NOdatetime_8-17_1-5_OHCLT_train_data")
 
+def get_shuffled_training_set(from_page, page_size, batch_size, verification_batches):
+  return get_data_batches(from_page, page_size, batch_size, verification_batches)
+  # dont shuffle for now, for easier insight into learning issues
+  # X_train_batches, y_train_batches, X_verify_bacthes, y_verify_batches = get_data_batches(from_page, page_size, batch_size, verification_batches)
+  # train_batches = list(zip(X_train_batches, y_train_batches))
+  # random.shuffle(train_batches)
+  # verification_batches = list(zip(X_verify_bacthes, y_verify_batches))
+  # random.shuffle(verification_batches)
+  #
+  # X_train_batches_shuffled, y_train_batches_shuffled = zip(*train_batches)
+  # X_verify_batches_shuffled, y_verify_batches_shuffled = zip(*verification_batches)
+  #
+  # return X_train_batches_shuffled, y_train_batches_shuffled, X_verify_batches_shuffled, y_verify_batches_shuffled
 
-  X_train_batches_shuffled, y_train_batches_shuffled = zip(*train_batches)
-  X_verify_batches_shuffled, y_verify_batches_shuffled = zip(*verification_batches)
-
-  return X_train_batches_shuffled, y_train_batches_shuffled, X_verify_batches_shuffled, y_verify_batches_shuffled
-
-def get_data_batches(batch_size, verification_batches):
-  raw_data = pd.read_csv(os.path.join("/mnt/c/Users/grzegorz/workspace/mql-csv-export/Data/", "mt4_EURUSD_1_range_1_UNnormalized_NOdatetime_OHCLT_train_data.csv"))
- # raw_data = raw_data[1:1000]
+def get_data_batches(from_page, page_size, batch_size, verification_batches):
+  batch_from = from_page * page_size
+  raw_data = pd.read_csv(data_file, skiprows=batch_from, nrows=page_size)
   verification_size = verification_batches + batch_size
 
   training_seq     = np.array(raw_data[verification_size:])
@@ -34,3 +38,49 @@ def get_data_batches(batch_size, verification_batches):
                      for i in range(len(verification_seq) - batch_size)])
 
   return X_train_batches, y_train_batches, X_verify_batches, y_verify_batches
+
+def get_data_from_file(filename, batch_size, verification_batches):
+  raw_data          = pd.read_csv(filename)
+  verification_size = verification_batches + batch_size + 1
+
+  training_seq     = np.array(raw_data[verification_size:])
+  verification_seq = np.array(raw_data[:verification_size])
+  # split into items of input_size
+  X_train_batches = np.array([[training_seq[i : batch_size + i]]
+                              for i in range(len(training_seq) - batch_size - 1)])
+  y_train_batches  = np.array([[[training_seq[batch_size + i][1:4]]]
+                               for i in range(len(training_seq) - batch_size)])
+  X_verify_batches = np.array([[verification_seq[i : batch_size + i]]
+                               for i in range(len(verification_seq) - batch_size - 1)])
+  y_verify_batches = np.array([[[verification_seq[batch_size + i][1:4]]]
+                               for i in range(len(verification_seq) - batch_size)])
+
+  return X_train_batches, y_train_batches, X_verify_batches, y_verify_batches
+
+def get_files_in_folder():
+  directory = os.fsencode(data_folder)
+  return os.listdir(directory)
+
+def get_total_data_batches_count_in_folder():
+  return len(get_files_in_folder())
+
+def get_data_batch_from_folder(index, batch_size, verification_batches):
+  directory = data_folder
+  files     = get_files_in_folder()
+  filename  = os.fsdecode(files[index])
+
+  print(filename)
+
+  return get_data_from_file(os.path.join(directory, filename), batch_size, verification_batches)
+
+
+def data_row_count():
+  with open(data_file) as f:
+    for i, l in enumerate(f):
+      pass
+  return i + 1
+
+
+# how many data
+def data_batches_count(row_count, batch_size):
+  return max(1, row_count // (1000000 // batch_size)), 1000000 // batch_size
