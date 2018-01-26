@@ -56,14 +56,14 @@ class MediumGraphConfig3(object):
 
 class MediumGraphConfig4(object):
   name           = "medium4"
-  rnn_neurons    = 1000
-  batch_size     = 10
-  rnn_layers     = 1
+  rnn_neurons    = 350
+  batch_size     = 35
+  rnn_layers     = 2
   n_outputs      = 3
   n_inputs       = 4
   initial_lr     = 0.001   #initial learning rate
-  decay_lr       = 0.99
-  keep_prob      = 0.5     # droput only on RNN layer(s)
+  decay_lr       = 0.9
+  keep_prob      = 0.45     # dropout only on RNN layer(s)
 
 class MediumBigGraphConfig(object):
   name           = "medium-big"
@@ -83,6 +83,7 @@ def build_rnn_time_series_graph(graph_config):
   create_rnn     = lambda:      tf.contrib.rnn.BasicRNNCell(num_units=graph_config.rnn_neurons, activation=tf.nn.relu) #tf.nn.relu
   create_dropout = lambda cell: tf.contrib.rnn.DropoutWrapper(cell, input_keep_prob=keep_prob)
 
+
   graph = tf.Graph()
   with graph.as_default():
     keep_prob      = tf.placeholder(tf.float32, None, name="keep_prob")
@@ -96,23 +97,25 @@ def build_rnn_time_series_graph(graph_config):
     dropout_layers = list(map(create_dropout, cell_layers))
 
     multi_layer_cell   = tf.contrib.rnn.MultiRNNCell(dropout_layers, state_is_tuple=False)
+
+    
     outputs, states    = tf.nn.dynamic_rnn(multi_layer_cell, X, dtype=tf.float32)
 
-    output_hidden  = tf.layers.dense(states       , graph_config.batch_size, kernel_initializer=he_init)
-    output         = tf.layers.dense(output_hidden, graph_config.n_outputs , kernel_initializer=he_init)
+ #   output_hidden  = tf.layers.dense(states       , graph_config.batch_size, kernel_initializer=he_init, activation=tf.nn.relu)
+    output         = tf.layers.dense(states, graph_config.n_outputs , kernel_initializer=he_init)
 
-    loss           = tf.reduce_mean(tf.square(output - y), name="loss")
+    loss           = tf.reduce_sum(tf.square(output - y), name="loss")
     optimizer      = tf.train.AdamOptimizer(learning_rate=learning_rate)
 
-    # gvs = optimizer.compute_gradients(loss)
-    # capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs]
-    # training_op = optimizer.apply_gradients(capped_gvs, name="training_op")
+    gvs = optimizer.compute_gradients(loss)
+    capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs]
+    training_op = optimizer.apply_gradients(capped_gvs, name="training_op")
 
-    training_op    = optimizer.minimize(loss, name="training_op")
+  #  training_op    = optimizer.minimize(loss, name="training_op")
 
     last_output    = tf.transpose(tf.transpose(output), name="last_output") # get last row - Shape of [batch_size, cell_units]
     mse_summary    = tf.summary.scalar("mse_summary", loss)
-    tf.summary.histogram("weights_output", output_hidden)
+ #   tf.summary.histogram("weights_output", output_hidden)
     tf.summary.histogram("weights_output", output)
     #tf.summary.histogram("weights_output2", output2)
     tf.summary.histogram("states1", states)
@@ -165,7 +168,7 @@ def build_time_series_graph(graph_config):
     #                                 name="outputs")
     last_output =tf.squeeze(tf.transpose(outputs, [0, 2, 1])[:,:,4], name="last_output") # get last row - Shape of [batch_size, cell_units]
 
-    loss             = tf.reduce_mean(tf.square(last_output - y), name="loss")
+    loss             = tf.reduce_sum(tf.square(last_output - y), name="loss")
   #  optimizer       = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=0.9)
     optimizer        = tf.train.AdamOptimizer(learning_rate=learning_rate)
   #  optimizer        = tf.train.RMSPropOptimizer(learning_rate)
@@ -247,7 +250,7 @@ def main(_):
     with training_session as sess:
       init  = tf.global_variables_initializer()
       saver = tf.train.Saver(max_to_keep=0)
-      data_batches_count = 30 # time_series_data.get_total_data_batches_count_in_folder()
+      data_batches_count = time_series_data.get_total_data_batches_count_in_folder()
 
 
       if is_continue:
