@@ -42,6 +42,29 @@ class MediumGraphConfig2(object):
   decay_lr       = 0.99
   keep_prob      = 0.5     # droput only on RNN layer(s)
 
+class MediumGraphConfig3(object):
+  name           = "medium3"
+  rnn_neurons    = 100
+  batch_size     = 60
+  rnn_layers     = 2
+  n_outputs      = 3
+  n_inputs       = 4
+  initial_lr     = 0.001   #initial learning rate
+  decay_lr       = 0.99
+  keep_prob      = 0.5     # droput only on RNN layer(s)
+
+
+class MediumGraphConfig4(object):
+  name           = "medium4"
+  rnn_neurons    = 1000
+  batch_size     = 10
+  rnn_layers     = 1
+  n_outputs      = 3
+  n_inputs       = 4
+  initial_lr     = 0.001   #initial learning rate
+  decay_lr       = 0.99
+  keep_prob      = 0.5     # droput only on RNN layer(s)
+
 class MediumBigGraphConfig(object):
   name           = "medium-big"
   rnn_neurons    = 40
@@ -57,10 +80,10 @@ class MediumBigGraphConfig(object):
 
 def build_rnn_time_series_graph(graph_config):
 
-  create_rnn     = lambda:      tf.contrib.rnn.GRUCell(num_units=graph_config.rnn_neurons, activation=tf.nn.relu) #tf.nn.relu
+  create_rnn     = lambda:      tf.contrib.rnn.BasicRNNCell(num_units=graph_config.rnn_neurons, activation=tf.nn.relu) #tf.nn.relu
   create_dropout = lambda cell: tf.contrib.rnn.DropoutWrapper(cell, input_keep_prob=keep_prob)
 
-  graph = tf.Graph();
+  graph = tf.Graph()
   with graph.as_default():
     keep_prob      = tf.placeholder(tf.float32, None, name="keep_prob")
     he_init        = tf.contrib.layers.variance_scaling_initializer()
@@ -81,11 +104,11 @@ def build_rnn_time_series_graph(graph_config):
     loss           = tf.reduce_mean(tf.square(output - y), name="loss")
     optimizer      = tf.train.AdamOptimizer(learning_rate=learning_rate)
 
-    gvs = optimizer.compute_gradients(loss)
-    capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs]
-    training_op = optimizer.apply_gradients(capped_gvs, name="training_op")
+    # gvs = optimizer.compute_gradients(loss)
+    # capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs]
+    # training_op = optimizer.apply_gradients(capped_gvs, name="training_op")
 
-    #training_op    = optimizer.minimize(loss, name="training_op")
+    training_op    = optimizer.minimize(loss, name="training_op")
 
     last_output    = tf.transpose(tf.transpose(output), name="last_output") # get last row - Shape of [batch_size, cell_units]
     mse_summary    = tf.summary.scalar("mse_summary", loss)
@@ -213,7 +236,7 @@ def main(_):
   is_training  = (sys.argv[1] == "train")
   is_continue  = (sys.argv[1] == "continue")
 
-  training_config  = MediumGraphConfig2()
+  training_config  = MediumGraphConfig4()
 
   if is_training:
     training_graph   = build_rnn_time_series_graph(training_config)
@@ -224,7 +247,7 @@ def main(_):
     with training_session as sess:
       init  = tf.global_variables_initializer()
       saver = tf.train.Saver(max_to_keep=0)
-      data_batches_count = 30 # limit learning for now; time_series_data.get_total_data_batches_count_in_folder()
+      data_batches_count = 30 # time_series_data.get_total_data_batches_count_in_folder()
 
 
       if is_continue:
@@ -239,16 +262,17 @@ def main(_):
       for epoch in range(epochs):
         log_dir     = "{}/run-{}-{}-{}/".format('/tmp/time_series_logdir', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
         save_dir    = "{}/run-{}-{}-{}/".format('/tmp/time_series', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
+        epoch_iteration = 0
         for data_batch in range(data_batches_count):  # just 30 days worth of training (for now)
           train_X, train_y, verification_X, verification_y = time_series_data.get_data_batch_from_folder(data_batch, training_config.batch_size,  1)
           data_batch_size  = len(train_X) - 1
 
           print("Training ", epoch, "epoch, with train set len of: ", data_batch_size, " iterations, current data batch: ",data_batch, ' / ', data_batches_count)
           file_writer = tf.summary.FileWriter(log_dir, tf.get_default_graph())
-          list(map(
-            lambda iteration: training_iteration(data_batch * data_batch_size + iteration, epoch, train_X[iteration % data_batch_size], train_y[iteration % data_batch_size], verification_X[0], verification_y[0], training_graph, sess, saver, save_dir, file_writer, training_config),
-            range(data_batch_size)))
-          saver.save(sess, save_dir + "model_final_" + str(epoch) + ".ckpt")
+          for data_iteration in range(data_batch_size * 2): # iterate twice for a given day
+            training_iteration(epoch_iteration, epoch, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], verification_X[0], verification_y[0], training_graph, sess, saver, save_dir, file_writer, training_config)
+            epoch_iteration += 1
+        saver.save(sess, save_dir + "model_final_" + str(epoch) + ".ckpt")
 
   else:
     restore_name = sys.argv[1]

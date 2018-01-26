@@ -43,19 +43,15 @@ def get_data_from_file(filename, batch_size, verification_batches):
   raw_data          = pd.read_csv(filename)
   verification_size = verification_batches + batch_size + 1
 
-  training_seq     = np.array(raw_data[verification_size:])
-  verification_seq = np.array(raw_data[:verification_size])
+  training_seq      = np.array(raw_data)
+
   # split into items of input_size
   X_train_batches = np.array([[training_seq[i : batch_size + i]]
                               for i in range(len(training_seq) - batch_size - 1)])
   y_train_batches  = np.array([[[training_seq[batch_size + i][1:4]]]
                                for i in range(len(training_seq) - batch_size)])
-  X_verify_batches = np.array([[verification_seq[i : batch_size + i]]
-                               for i in range(len(verification_seq) - batch_size - 1)])
-  y_verify_batches = np.array([[[verification_seq[batch_size + i][1:4]]]
-                               for i in range(len(verification_seq) - batch_size)])
 
-  return X_train_batches, y_train_batches, X_verify_batches, y_verify_batches
+  return X_train_batches, y_train_batches, [X_train_batches[0]], [y_train_batches[0]]
 
 def get_files_in_folder():
   directory = os.fsencode(data_folder)
