@@ -56,14 +56,14 @@ class MediumGraphConfig3(object):
 
 class MediumGraphConfig4(object):
   name           = "medium4"
-  rnn_neurons    = 600
-  batch_size     = 25
-  rnn_layers     = 2
+  rnn_neurons    = 500
+  batch_size     = 100
+  rnn_layers     = 1
   n_outputs      = 4
   n_inputs       = 4
   initial_lr     = 0.001   #initial learning rate
-  decay_lr       = 0.9
-  keep_prob      = 0.55     # dropout only on RNN layer(s)
+  decay_lr       = 0.99
+  keep_prob      = 0.5     # dropout only on RNN layer(s)
 
 class MediumBigGraphConfig(object):
   name           = "medium-big"
@@ -80,7 +80,7 @@ class MediumBigGraphConfig(object):
 
 def build_rnn_time_series_graph(graph_config):
 
-  create_rnn     = lambda:      tf.contrib.rnn.BasicRNNCell(num_units=graph_config.rnn_neurons, activation=tf.nn.relu) #tf.nn.relu
+  create_rnn     = lambda:      tf.contrib.rnn.BasicRNNCell(num_units=graph_config.rnn_neurons) #tf.nn.relu
   create_dropout = lambda cell: tf.contrib.rnn.DropoutWrapper(cell, input_keep_prob=keep_prob)
 
 
@@ -96,7 +96,7 @@ def build_rnn_time_series_graph(graph_config):
     cell_layers    = [create_rnn() for _ in range(graph_config.rnn_layers)]
     dropout_layers = list(map(create_dropout, cell_layers))
 
-    multi_layer_cell    = tf.contrib.rnn.MultiRNNCell(dropout_layers, state_is_tuple=False)
+    multi_layer_cell    = tf.contrib.rnn.MultiRNNCell(dropout_layers)
     rnn_outputs, states = tf.nn.dynamic_rnn(multi_layer_cell, X, dtype=tf.float32)
 
     stacked_rnn_outputs = tf.reshape(rnn_outputs, [-1, graph_config.rnn_neurons], name="stacked_rnn_outputs")
@@ -252,7 +252,7 @@ def main(_):
     with training_session as sess:
       init.run()
       saver = tf.train.Saver(max_to_keep=0)
-      data_batches_count = time_series_data.get_total_data_batches_count_in_folder()
+      data_batches_count = 30 # time_series_data.get_total_data_batches_count_in_folder()
 
 
       if is_continue:
