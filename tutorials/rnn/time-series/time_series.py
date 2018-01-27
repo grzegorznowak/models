@@ -56,9 +56,9 @@ class MediumGraphConfig3(object):
 
 class MediumGraphConfig4(object):
   name           = "medium4"
-  rnn_neurons    = 300
-  batch_size     = 250
-  rnn_layers     = 1
+  rnn_neurons    = 700
+  batch_size     = 5
+  rnn_layers     = 3
   n_outputs      = 5
   n_inputs       = 5
   initial_lr     = 0.003   #initial learning rate
@@ -80,7 +80,7 @@ class MediumBigGraphConfig(object):
 
 def build_rnn_time_series_graph(graph_config):
 
-  create_rnn     = lambda:      tf.contrib.rnn.BasicRNNCell(num_units=graph_config.rnn_neurons) #tf.nn.relu , use_peepholes=True
+  create_rnn     = lambda:      tf.contrib.rnn.LSTMCell(num_units=graph_config.rnn_neurons) #tf.nn.relu , use_peepholes=True
   create_dropout = lambda cell: tf.contrib.rnn.DropoutWrapper(cell, input_keep_prob=keep_prob)
 
 
@@ -108,11 +108,11 @@ def build_rnn_time_series_graph(graph_config):
     loss           = tf.reduce_mean(tf.square(outputs - y), name="loss")
     optimizer      = tf.train.AdamOptimizer(learning_rate=learning_rate)
 
-    # gvs = optimizer.compute_gradients(loss)
-    # capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs]
-    # training_op = optimizer.apply_gradients(capped_gvs, name="training_op")
+    gvs = optimizer.compute_gradients(loss)
+    capped_gvs = [(tf.clip_by_value(grad, -10., 10.), var) for grad, var in gvs]
+    training_op = optimizer.apply_gradients(capped_gvs, name="training_op")
 
-    training_op    = optimizer.minimize(loss, name="training_op")
+#    training_op    = optimizer.minimize(loss, name="training_op")
 
 
 
@@ -201,7 +201,7 @@ def training_iteration(iteration, epoch, train_X, train_y, verify_X, verify_y, g
   current_learning_rate = training_config.initial_lr * (training_config.decay_lr**epoch)
 
   session.run(training_op, feed_dict={X: train_X, y: train_y, keep_prob: training_config.keep_prob, learning_rate: current_learning_rate})
-  if iteration % 100 == 0:
+  if iteration % 10 == 0:
     mse        = session.run(loss, feed_dict={X: train_X, y: train_y, keep_prob: 1})
  #   verify_mse = session.run(loss, feed_dict={X: verify_X, y: verify_y, keep_prob: 1})
     merged     = tf.summary.merge_all()
@@ -211,8 +211,8 @@ def training_iteration(iteration, epoch, train_X, train_y, verify_X, verify_y, g
     file_writer.add_summary(summary, iteration)
 
     print("epoch: ", epoch, "iteration: ", iteration)
-    print("train_y:         "  , train_y[-1][-1])
-    print("train_response:  "  , train_response[-1][-1])
+    print("train_y: \n"  , train_y[-1])
+    print("train_response: \n "  , train_response[-1])
 #    print("verify_y:        "  , verify_y)
 #    print("verify_response: "  , verify_response)
     print("\tMSE:"             , mse)
@@ -272,7 +272,7 @@ def main(_):
 
           print("Training ", epoch, "epoch, with train set len of: ", data_batch_size, " iterations, current data batch: ",data_batch, ' / ', data_batches_count)
           file_writer = tf.summary.FileWriter(log_dir, tf.get_default_graph())
-          for data_iteration in range(data_batch_size * 2): # iterate twice for a given day
+          for data_iteration in range(data_batch_size): # iterate twice for a given day
             training_iteration(epoch_iteration, epoch, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], verification_X[0], verification_y[0], training_graph, sess, saver, save_dir, file_writer, training_config)
             epoch_iteration += 1
         saver.save(sess, save_dir + "model_final_" + str(epoch) + ".ckpt")
