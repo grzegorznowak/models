@@ -56,13 +56,13 @@ class MediumGraphConfig3(object):
 
 class MediumGraphConfig4(object):
   name           = "medium4"
-  rnn_neurons    = 750
-  batch_size     = 120
+  rnn_neurons    = 300
+  batch_size     = 250
   rnn_layers     = 1
-  n_outputs      = 4
-  n_inputs       = 4
-  initial_lr     = 0.001   #initial learning rate
-  decay_lr       = 0.99
+  n_outputs      = 5
+  n_inputs       = 5
+  initial_lr     = 0.003   #initial learning rate
+  decay_lr       = 0.95
   keep_prob      = 0.5     # dropout only on RNN layer(s)
 
 class MediumBigGraphConfig(object):
@@ -80,7 +80,7 @@ class MediumBigGraphConfig(object):
 
 def build_rnn_time_series_graph(graph_config):
 
-  create_rnn     = lambda:      tf.contrib.rnn.BasicRNNCell(num_units=graph_config.rnn_neurons) #tf.nn.relu
+  create_rnn     = lambda:      tf.contrib.rnn.BasicRNNCell(num_units=graph_config.rnn_neurons) #tf.nn.relu , use_peepholes=True
   create_dropout = lambda cell: tf.contrib.rnn.DropoutWrapper(cell, input_keep_prob=keep_prob)
 
 
