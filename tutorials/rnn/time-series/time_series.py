@@ -56,8 +56,8 @@ class MediumGraphConfig3(object):
 
 class MediumGraphConfig4(object):
   name           = "medium4"
-  rnn_neurons    = 500
-  batch_size     = 100
+  rnn_neurons    = 750
+  batch_size     = 120
   rnn_layers     = 1
   n_outputs      = 4
   n_inputs       = 4
@@ -252,7 +252,7 @@ def main(_):
     with training_session as sess:
       init.run()
       saver = tf.train.Saver(max_to_keep=0)
-      data_batches_count = 30 # time_series_data.get_total_data_batches_count_in_folder()
+      data_batches_count = time_series_data.get_total_data_batches_count_in_folder()
 
 
       if is_continue:
