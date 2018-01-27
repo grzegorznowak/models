@@ -30,10 +30,13 @@ def get_data_batches(from_page, page_size, batch_size, verification_batches):
   # split into items of input_size
   X_train_batches = np.array([[training_seq[i : batch_size + i]]
                for i in range(len(training_seq) - batch_size - 1)])
-  y_train_batches  = np.array([[[training_seq[batch_size + i][1:4]]]
+
+  y_train_batches  = np.array([[training_seq[i + 1 : batch_size + i +1]]
                for i in range(len(training_seq) - batch_size)])
+
   X_verify_batches = np.array([[verification_seq[i : batch_size + i]]
                      for i in range(len(verification_seq) - batch_size - 1)])
+
   y_verify_batches = np.array([[[verification_seq[batch_size + i][1:4]]]
                      for i in range(len(verification_seq) - batch_size)])
 
@@ -48,10 +51,12 @@ def get_data_from_file(filename, batch_size, verification_batches):
   # split into items of input_size
   X_train_batches = np.array([[training_seq[i : batch_size + i]]
                               for i in range(len(training_seq) - batch_size - 1)])
-  y_train_batches  = np.array([[[training_seq[batch_size + i][1:4]]]
-                               for i in range(len(training_seq) - batch_size)])
 
-  return X_train_batches, y_train_batches, [X_train_batches[0]], [y_train_batches[0]]
+  y_train_batches = np.array([[training_seq[i + 1 : batch_size + i + 1]]
+                              for i in range(len(training_seq) - batch_size)])
+
+
+  return X_train_batches, y_train_batches, X_train_batches, y_train_batches
 
 def get_files_in_folder():
   directory = os.fsencode(data_folder)

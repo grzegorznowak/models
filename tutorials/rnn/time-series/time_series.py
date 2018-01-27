@@ -56,14 +56,14 @@ class MediumGraphConfig3(object):
 
 class MediumGraphConfig4(object):
   name           = "medium4"
-  rnn_neurons    = 350
-  batch_size     = 35
+  rnn_neurons    = 600
+  batch_size     = 25
   rnn_layers     = 2
-  n_outputs      = 3
+  n_outputs      = 4
   n_inputs       = 4
   initial_lr     = 0.001   #initial learning rate
   decay_lr       = 0.9
-  keep_prob      = 0.45     # dropout only on RNN layer(s)
+  keep_prob      = 0.55     # dropout only on RNN layer(s)
 
 class MediumBigGraphConfig(object):
   name           = "medium-big"
@@ -90,38 +90,40 @@ def build_rnn_time_series_graph(graph_config):
     he_init        = tf.contrib.layers.variance_scaling_initializer()
 
     X              = tf.placeholder(tf.float32, [None, graph_config.batch_size, graph_config.n_inputs] , name="X")
-    y              = tf.placeholder(tf.float32, [None, 1, graph_config.n_outputs], name="y")
+    y              = tf.placeholder(tf.float32, [None, graph_config.batch_size, graph_config.n_outputs], name="y")
     learning_rate  = tf.placeholder(tf.float32, None, name="learning_rate")
 
     cell_layers    = [create_rnn() for _ in range(graph_config.rnn_layers)]
     dropout_layers = list(map(create_dropout, cell_layers))
 
-    multi_layer_cell   = tf.contrib.rnn.MultiRNNCell(dropout_layers, state_is_tuple=False)
+    multi_layer_cell    = tf.contrib.rnn.MultiRNNCell(dropout_layers, state_is_tuple=False)
+    rnn_outputs, states = tf.nn.dynamic_rnn(multi_layer_cell, X, dtype=tf.float32)
 
-    
-    outputs, states    = tf.nn.dynamic_rnn(multi_layer_cell, X, dtype=tf.float32)
+    stacked_rnn_outputs = tf.reshape(rnn_outputs, [-1, graph_config.rnn_neurons], name="stacked_rnn_outputs")
+    stacked_outputs     = tf.layers.dense(stacked_rnn_outputs, graph_config.n_outputs, name="stacked_outputs", kernel_initializer=he_init)
+    outputs             = tf.reshape(stacked_outputs,
+                                     [-1, graph_config.batch_size, graph_config.n_outputs],
+                                     name="outputs")
 
- #   output_hidden  = tf.layers.dense(states       , graph_config.batch_size, kernel_initializer=he_init, activation=tf.nn.relu)
-    output         = tf.layers.dense(states, graph_config.n_outputs , kernel_initializer=he_init)
-
-    loss           = tf.reduce_sum(tf.square(output - y), name="loss")
+    loss           = tf.reduce_mean(tf.square(outputs - y), name="loss")
     optimizer      = tf.train.AdamOptimizer(learning_rate=learning_rate)
 
-    gvs = optimizer.compute_gradients(loss)
-    capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs]
-    training_op = optimizer.apply_gradients(capped_gvs, name="training_op")
+    # gvs = optimizer.compute_gradients(loss)
+    # capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs]
+    # training_op = optimizer.apply_gradients(capped_gvs, name="training_op")
 
-  #  training_op    = optimizer.minimize(loss, name="training_op")
+    training_op    = optimizer.minimize(loss, name="training_op")
 
-    last_output    = tf.transpose(tf.transpose(output), name="last_output") # get last row - Shape of [batch_size, cell_units]
+
+
     mse_summary    = tf.summary.scalar("mse_summary", loss)
- #   tf.summary.histogram("weights_output", output_hidden)
-    tf.summary.histogram("weights_output", output)
-    #tf.summary.histogram("weights_output2", output2)
+    tf.summary.histogram("stacked_outputs", stacked_outputs)
+    tf.summary.histogram("weights_output", outputs)
+    tf.summary.histogram("rnn_outputs", rnn_outputs)
     tf.summary.histogram("states1", states)
- #   tf.summary.histogram("hidden_in", hidden_in)
 
-  return graph
+    init = tf.global_variables_initializer();
+  return graph, init
 
 
 def build_time_series_graph(graph_config):
@@ -192,7 +194,7 @@ def training_iteration(iteration, epoch, train_X, train_y, verify_X, verify_y, g
   y             = graph.get_tensor_by_name("y:0")
   keep_prob     = graph.get_tensor_by_name("keep_prob:0")
   loss          = graph.get_tensor_by_name("loss:0")
-  output        = graph.get_tensor_by_name("last_output:0")
+  outputs        = graph.get_tensor_by_name("outputs:0")
   learning_rate = graph.get_tensor_by_name("learning_rate:0")
   training_op   = graph.get_operation_by_name("training_op")
 
@@ -201,20 +203,20 @@ def training_iteration(iteration, epoch, train_X, train_y, verify_X, verify_y, g
   session.run(training_op, feed_dict={X: train_X, y: train_y, keep_prob: training_config.keep_prob, learning_rate: current_learning_rate})
   if iteration % 100 == 0:
     mse        = session.run(loss, feed_dict={X: train_X, y: train_y, keep_prob: 1})
-    verify_mse = session.run(loss, feed_dict={X: verify_X, y: verify_y, keep_prob: 1})
+ #   verify_mse = session.run(loss, feed_dict={X: verify_X, y: verify_y, keep_prob: 1})
     merged     = tf.summary.merge_all()
     summary    = session.run(merged, feed_dict={X: train_X, y: train_y, keep_prob: 1})
-    train_response  = session.run(output, feed_dict={X: train_X, keep_prob: 1})
-    verify_response = session.run(output, feed_dict={X: verify_X, keep_prob: 1})
+    train_response  = session.run(outputs, feed_dict={X: train_X, keep_prob: 1})
+ #   verify_response = session.run(outputs, feed_dict={X: verify_X, keep_prob: 1})
     file_writer.add_summary(summary, iteration)
 
     print("epoch: ", epoch, "iteration: ", iteration)
-    print("train_y:         "  , train_y)
-    print("train_response:  "  , train_response)
-    print("verify_y:        "  , verify_y)
-    print("verify_response: "  , verify_response)
+    print("train_y:         "  , train_y[-1][-1])
+    print("train_response:  "  , train_response[-1][-1])
+#    print("verify_y:        "  , verify_y)
+#    print("verify_response: "  , verify_response)
     print("\tMSE:"             , mse)
-    print("\tVerification MSE:", verify_mse)
+    #print("\tVerification MSE:", verify_mse)
     print("current LR: ", current_learning_rate)
 
   if iteration % 1000 == 0:  # save network rarily
@@ -242,13 +244,13 @@ def main(_):
   training_config  = MediumGraphConfig4()
 
   if is_training:
-    training_graph   = build_rnn_time_series_graph(training_config)
+    training_graph, init = build_rnn_time_series_graph(training_config)
     training_session = tf.Session(graph=training_graph)
     epochs           = 500
 
 
     with training_session as sess:
-      init  = tf.global_variables_initializer()
+      init.run()
       saver = tf.train.Saver(max_to_keep=0)
       data_batches_count = time_series_data.get_total_data_batches_count_in_folder()
 
@@ -257,8 +259,6 @@ def main(_):
         restore_name  = sys.argv[2]
         print(restore_name)
         saver.restore(sess, restore_name)
-      else:
-        init.run()
 
       print("data_batches_count in folder", data_batches_count)
 
