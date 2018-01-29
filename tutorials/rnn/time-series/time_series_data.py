@@ -61,12 +61,50 @@ def get_data_from_file(filename, batch_size, verification_batches):
 
   return X_train_batches, y_train_batches, X_train_batches, y_train_batches
 
+
+def parse_cmdline(ars):
+  is_training     = (ars[1] == "train")
+  is_continue     = (ars[1] == "continue")
+  restore_name    = ""
+  start_day_input = ""
+  end_day_input   = ""
+
+  if is_continue:
+    try:
+      start_day_input = ars[3]
+    except IndexError:
+      start_day_input = 0
+
+    try:
+      end_day_input   = ars[4]
+    except IndexError:
+      end_day_input   = 0
+    restore_name    = ars[2]
+  else:
+    try:
+      start_day_input = ars[2]
+    except IndexError:
+      start_day_input = 0
+
+    try:
+      end_day_input   = ars[3]
+    except IndexError:
+      end_day_input   = 0
+
+  return is_training, is_continue, restore_name, start_day_input, end_day_input
+
 def get_files_in_folder():
   directory = os.fsencode(data_folder)
   return os.listdir(directory)
 
 def get_total_data_batches_count_in_folder():
   return len(get_files_in_folder())
+
+def get_random_data_batch_from_folder(batch_size, verification_batches):
+  files     = get_files_in_folder()
+  random_index = random.randint(0, len(files) -1)
+
+  return get_data_batch_from_folder(random_index, batch_size, verification_batches)
 
 def get_data_batch_from_folder(index, batch_size, verification_batches):
   directory = data_folder

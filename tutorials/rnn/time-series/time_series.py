@@ -62,7 +62,7 @@ class MediumGraphConfig4(object):
   n_outputs      = 4
   n_inputs       = 4
   initial_lr     = 0.001   #initial learning rate
-  decay_lr       = 0.95
+  decay_lr       = 0.93
   keep_prob      = 0.99     # dropout only on RNN layer(s)
 
 class MediumBigGraphConfig(object):
@@ -100,6 +100,7 @@ def build_rnn_time_series_graph(graph_config):
     X              = tf.placeholder(tf.float32, [None, graph_config.batch_size, graph_config.n_inputs] , name="X")
     y              = tf.placeholder(tf.float32, [None, graph_config.batch_size, graph_config.n_outputs], name="y")
     learning_rate  = tf.placeholder(tf.float32, None, name="learning_rate")
+    epoch          = tf.placeholder(tf.int16  , name="epoch")
 
     cell_layers    = [create_rnn() for _ in range(graph_config.rnn_layers)]
     dropout_layers = list(map(create_dropout, cell_layers))
@@ -125,11 +126,11 @@ def build_rnn_time_series_graph(graph_config):
     training_op    = optimizer.minimize(loss, name="training_op")
 
 
+    tf.summary.scalar("learning_rate", learning_rate)
+    tf.summary.scalar("epoch"        , epoch)
+    tf.summary.scalar("mse_summary"  , loss)
 
-    mse_summary    = tf.summary.scalar("mse_summary", loss)
-    tf.summary.histogram("stacked_outputs", stacked_outputs)
     tf.summary.histogram("weights_output", outputs)
-    tf.summary.histogram("rnn_outputs", rnn_outputs)
     tf.summary.histogram("new_states", final_state)
 
     init = tf.global_variables_initializer()
@@ -139,9 +140,10 @@ def build_rnn_time_series_graph(graph_config):
 def training_iteration(previous_state, iteration, epoch, train_X, train_y, verify_X, verify_y, graph_wrapper, session, saver, save_dir, file_writer, training_config):
   graph         = graph_wrapper.graph
   initial_state_placeholder = graph_wrapper.initial_state_placeholder
-  new_state_op = graph_wrapper.final_state_op
+  new_state_op  = graph_wrapper.final_state_op
   X             = graph.get_tensor_by_name("X:0")
   y             = graph.get_tensor_by_name("y:0")
+  epoch_holder  = graph.get_tensor_by_name("epoch:0")
   keep_prob     = graph.get_tensor_by_name("keep_prob:0")
   loss          = graph.get_tensor_by_name("loss:0")
   outputs       = graph.get_tensor_by_name("outputs:0")
@@ -155,16 +157,17 @@ def training_iteration(previous_state, iteration, epoch, train_X, train_y, verif
     mse        = session.run(loss, feed_dict={X: train_X, y: train_y, keep_prob: 1, initial_state_placeholder: previous_state})
     verify_mse = session.run(loss, feed_dict={X: verify_X, y: verify_y, keep_prob: 1, initial_state_placeholder: previous_state})
     merged     = tf.summary.merge_all()
-    summary    = session.run(merged, feed_dict={X: train_X, y: train_y, keep_prob: 1, initial_state_placeholder: previous_state})
+    summary    = session.run(merged,
+                             feed_dict={
+                               X: train_X, y: train_y, keep_prob: 1,
+                               initial_state_placeholder: previous_state, learning_rate: current_learning_rate,
+                               epoch_holder: epoch })
     train_response  = session.run(outputs, feed_dict={X: train_X, keep_prob: 1, initial_state_placeholder: previous_state})
-    verify_response = session.run(outputs, feed_dict={X: verify_X, keep_prob: 1, initial_state_placeholder: previous_state})
     file_writer.add_summary(summary, iteration)
 
     print("epoch: ", epoch, "iteration: ", iteration)
     print("train_y: \n"  , train_y)
     print("train_response: \n "  , train_response)
-    print("verify_y:        "  , verify_y)
-    print("verify_response: "  , verify_response)
     print("\tMSE:"             , mse)
     print("\tVerification MSE:", verify_mse)
     print("current LR: ", current_learning_rate)
@@ -186,39 +189,51 @@ def prediction(graph, session, X_batch, y_batch):
   print("MSE: ", mse)
 
 
+
 def main(_):
 
-  is_training  = (sys.argv[1] == "train")
-  is_continue  = (sys.argv[1] == "continue")
+  is_training, is_continue, restore_name, start_day_input, end_day_input = time_series_data.parse_cmdline(sys.argv)
+
+  if(len(sys.argv) < 1):
+    print("wrong usage")
+    os.exit(1)
 
   training_config  = MediumGraphConfig4()
 
-  if is_training:
+  # @TODO: need to redo those CMD params logic when they grow in number. Just stick to the bruteforce IF power
+  if is_training or is_continue:
     graph_wrapper    = build_rnn_time_series_graph(training_config)
     training_session = tf.Session(graph=graph_wrapper.graph)
     init_op          = graph_wrapper.init_op
     epochs           = 500
 
-
     with training_session as sess:
-      init_op.run()
-      saver = tf.train.Saver(max_to_keep=0)
-      data_batches_count = 2 # time_series_data.get_total_data_batches_count_in_folder()
 
+      saver = tf.train.Saver(max_to_keep=0)
+      data_batches_count = time_series_data.get_total_data_batches_count_in_folder()
+
+      # it doesn't mean that much anymore, but is a good heuristic to skip to another epoch after
+      # data_batches_count worth of samples has passed by
+      end_day            = data_batches_count
 
       if is_continue:
-        restore_name  = sys.argv[2]
         print(restore_name)
         saver.restore(sess, restore_name)
 
+      else:
+        init_op.run()
+
       print("data_batches_count in folder", data_batches_count)
 
+      start_day = int(start_day_input)
+      if int(end_day_input):
+        end_day =  int(end_day_input)
       for epoch in range(epochs):
         log_dir     = "{}/run-{}-{}-{}/".format('/tmp/time_series_logdir', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
         save_dir    = "{}/run-{}-{}-{}/".format('/tmp/time_series', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
         epoch_iteration = 0
-        for data_batch in range(data_batches_count):
-          train_X, train_y, verification_X, verification_y = time_series_data.get_data_batch_from_folder(data_batch, training_config.batch_size,  1)
+        for data_batch in range(start_day, end_day):
+          train_X, train_y, verification_X, verification_y = time_series_data.get_random_data_batch_from_folder(training_config.batch_size,  1)
           data_batch_size  = len(train_X) - 1
           inital_state_placeholder = graph_wrapper.initial_state_placeholder
 
