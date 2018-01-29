@@ -7,7 +7,7 @@ data_file = os.path.join("/mnt/c/Users/grzegorz/workspace/mql-csv-export/Data/",
 
 
 # data_folder = os.path.join("/mnt/c/Users/grzegorz/AppData/Roaming/MetaQuotes/Terminal/3BD2B5E5A5264AFE17C1E2DDC7D6B381/tester/files/mt4_EURUSD_1__range_1_UNnormalized_NOdatetime_8-17_1-5_OHCLT_train_data")
-data_folder = os.path.join("/mnt/c/Users/grzegorz/AppData/Roaming/MetaQuotes/Terminal/3BD2B5E5A5264AFE17C1E2DDC7D6B381/tester/files/mt4_EURUSD_1__range_1_UNnormalized_datetime_0-24_1-5_OHCLT_train_data")
+data_folder = os.path.join("/mnt/c/Users/grzegorz/AppData/Roaming/MetaQuotes/Terminal/3BD2B5E5A5264AFE17C1E2DDC7D6B381/tester/files/mt4_EURUSD_1__range_1_UNnormalized_NOdatetime_0-24_1-5_OHCLT_train_data")
 
 def get_shuffled_training_set(from_page, page_size, batch_size, verification_batches):
   return get_data_batches(from_page, page_size, batch_size, verification_batches)

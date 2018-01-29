@@ -40,7 +40,7 @@ class MediumGraphConfig2(object):
   n_inputs       = 4
   initial_lr     = 0.001   #initial learning rate
   decay_lr       = 0.99
-  keep_prob      = 0.5     # droput only on RNN layer(s)
+  keep_prob      = 0.95     # droput only on RNN layer(s)
 
 class MediumGraphConfig3(object):
   name           = "medium3"
@@ -57,13 +57,13 @@ class MediumGraphConfig3(object):
 class MediumGraphConfig4(object):
   name           = "medium4"
   rnn_neurons    = 500
-  batch_size     = 5
-  rnn_layers     = 4
-  n_outputs      = 5
-  n_inputs       = 5
+  batch_size     = 1
+  rnn_layers     = 1
+  n_outputs      = 4
+  n_inputs       = 4
   initial_lr     = 0.001   #initial learning rate
   decay_lr       = 0.95
-  keep_prob      = 0.8     # dropout only on RNN layer(s)
+  keep_prob      = 0.99     # dropout only on RNN layer(s)
 
 class MediumBigGraphConfig(object):
   name           = "medium-big"
@@ -118,11 +118,11 @@ def build_rnn_time_series_graph(graph_config):
     loss       = tf.reduce_mean(tf.square(outputs - y), name="loss")
     optimizer  = tf.train.AdamOptimizer(learning_rate=learning_rate)
 
-    gvs        = optimizer.compute_gradients(loss)
-    capped_gvs = [(tf.clip_by_value(grad, -20., 20.), var) for grad, var in gvs]
-    training_op = optimizer.apply_gradients(capped_gvs, name="training_op")
+  #  gvs        = optimizer.compute_gradients(loss)
+  #  capped_gvs = [(tf.clip_by_value(grad, -20., 20.), var) for grad, var in gvs]
+  #  training_op = optimizer.apply_gradients(capped_gvs, name="training_op")
 
-#    training_op    = optimizer.minimize(loss, name="training_op")
+    training_op    = optimizer.minimize(loss, name="training_op")
 
 
 
@@ -151,22 +151,22 @@ def training_iteration(previous_state, iteration, epoch, train_X, train_y, verif
   current_learning_rate = training_config.initial_lr * (training_config.decay_lr**epoch)
   train, new_state = session.run([training_op, new_state_op] , feed_dict={X: train_X, y: train_y, keep_prob: training_config.keep_prob, learning_rate: current_learning_rate, initial_state_placeholder: previous_state})
 
-  if iteration % 10 == 0:
+  if iteration % 100 == 0:
     mse        = session.run(loss, feed_dict={X: train_X, y: train_y, keep_prob: 1, initial_state_placeholder: previous_state})
- #   verify_mse = session.run(loss, feed_dict={X: verify_X, y: verify_y, keep_prob: 1})
+    verify_mse = session.run(loss, feed_dict={X: verify_X, y: verify_y, keep_prob: 1, initial_state_placeholder: previous_state})
     merged     = tf.summary.merge_all()
     summary    = session.run(merged, feed_dict={X: train_X, y: train_y, keep_prob: 1, initial_state_placeholder: previous_state})
     train_response  = session.run(outputs, feed_dict={X: train_X, keep_prob: 1, initial_state_placeholder: previous_state})
- #   verify_response = session.run(outputs, feed_dict={X: verify_X, keep_prob: 1})
+    verify_response = session.run(outputs, feed_dict={X: verify_X, keep_prob: 1, initial_state_placeholder: previous_state})
     file_writer.add_summary(summary, iteration)
 
     print("epoch: ", epoch, "iteration: ", iteration)
-    print("train_y: \n"  , train_y[-1])
-    print("train_response: \n "  , train_response[-1])
-#    print("verify_y:        "  , verify_y)
-#    print("verify_response: "  , verify_response)
+    print("train_y: \n"  , train_y)
+    print("train_response: \n "  , train_response)
+    print("verify_y:        "  , verify_y)
+    print("verify_response: "  , verify_response)
     print("\tMSE:"             , mse)
-    #print("\tVerification MSE:", verify_mse)
+    print("\tVerification MSE:", verify_mse)
     print("current LR: ", current_learning_rate)
 
   if iteration % 5000 == 0:  # save network rarily
@@ -203,7 +203,7 @@ def main(_):
     with training_session as sess:
       init_op.run()
       saver = tf.train.Saver(max_to_keep=0)
-      data_batches_count = time_series_data.get_total_data_batches_count_in_folder()
+      data_batches_count = 2 # time_series_data.get_total_data_batches_count_in_folder()
 
 
       if is_continue:
@@ -228,7 +228,7 @@ def main(_):
 
           print("Training ", epoch, "epoch, with train set len of: ", data_batch_size, " iterations, current data batch: ",data_batch, ' / ', data_batches_count)
           file_writer = tf.summary.FileWriter(log_dir, tf.get_default_graph())
-          for data_iteration in range(data_batch_size): 
+          for data_iteration in range(data_batch_size):
             previous_state_value = training_iteration(previous_state_value, epoch_iteration, epoch, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], verification_X[0], verification_y[0], graph_wrapper, sess, saver, save_dir, file_writer, training_config)
             epoch_iteration += 1
         saver.save(sess, save_dir + "model_final_" + str(epoch) + ".ckpt")
