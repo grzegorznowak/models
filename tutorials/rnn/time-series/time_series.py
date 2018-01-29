@@ -58,7 +58,7 @@ class MediumGraphConfig4(object):
   name           = "medium4"
   rnn_neurons    = 500
   batch_size     = 1
-  rnn_layers     = 1
+  rnn_layers     = 2
   n_outputs      = 4
   n_inputs       = 4
   initial_lr     = 0.001   #initial learning rate
