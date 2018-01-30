@@ -30,7 +30,9 @@ class DesktopCPUConfig(object):
   initial_lr     = 0.001   #initial learning rate
   decay_lr       = 0.99
   keep_prob      = 0.99     # dropout only on RNN layer(s)
-  create_rnn     = lambda:    tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) #tf.nn.relu , use_peepholes=True
+
+  def create_rnn(self):
+    return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) #tf.nn.relu , use_peepholes=True
 
 
 class GraphWrapper():
@@ -53,7 +55,6 @@ class GraphWrapper():
 
 def build_rnn_time_series_graph(graph_config):
 
-  create_rnn     = graph_config.create_rnn
   create_dropout = lambda cell: tf.contrib.rnn.DropoutWrapper(cell, input_keep_prob=keep_prob)
 
   graph = tf.Graph()
@@ -67,7 +68,7 @@ def build_rnn_time_series_graph(graph_config):
     epoch          = tf.placeholder(tf.int16  , name="epoch")
     train_day      = tf.placeholder(tf.int16  , name="train_day")
 
-    cell_layers    = [create_rnn() for _ in range(graph_config.rnn_layers)]
+    cell_layers    = [graph_config.create_rnn() for _ in range(graph_config.rnn_layers)]
     dropout_layers = list(map(create_dropout, cell_layers))
 
     multi_layer_cell          = tf.contrib.rnn.MultiRNNCell(dropout_layers, state_is_tuple=False)
