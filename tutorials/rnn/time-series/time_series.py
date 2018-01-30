@@ -7,90 +7,53 @@ from random   import randint
 from datetime import datetime
 
 
-class SmallGraphConfig(object):
-  name          = "small"
-  n_neurons     = 10
-  batch_size    = 5
-  n_inputs      = 6  # assumes datetime entry is present
-  n_layers      = 3
-  n_outputs     = 4
-  initial_lr    = 0.001   #initial learning rate
-  decay_lr      = 0.99
-  keep_prob     = 0.9
-
-class MediumGraphConfig(object):
-  name           = "medium"
-  rnn_neurons    = 200
-  batch_size     = 60
+class LaptopCPUConfig(object):
+  name           = "LaptopCPU"
+  rnn_neurons    = 1000
+  batch_size     = 1
   rnn_layers     = 2
-  hidden_layers  = 3   # this is not automated still
-  hidden_neurons = 10
-  n_outputs      = 3
-  n_inputs       = 4
-  initial_lr     = 0.001   #initial learning rate
-  decay_lr       = 0.9
-  keep_prob      = 0.5     # droput only on RNN layer(s)
-
-class MediumGraphConfig2(object):
-  name           = "medium2"
-  rnn_neurons    = 100
-  batch_size     = 30
-  rnn_layers     = 2
-  n_outputs      = 3
-  n_inputs       = 4
-  initial_lr     = 0.0009   #initial learning rate
-  decay_lr       = 0.99
-  keep_prob      = 0.95     # droput only on RNN layer(s)
-
-class MediumGraphConfig3(object):
-  name           = "medium3"
-  rnn_neurons    = 100
-  batch_size     = 60
-  rnn_layers     = 2
-  n_outputs      = 3
+  n_outputs      = 4
   n_inputs       = 4
   initial_lr     = 0.001   #initial learning rate
   decay_lr       = 0.99
-  keep_prob      = 0.5     # droput only on RNN layer(s)
+  keep_prob      = 0.5     # dropout only on RNN layer(s)
+  create_rnn     = lambda:    tf.contrib.rnn.RNNCell(num_units=self.rnn_neurons) # try using faster cells
 
 
-class MediumGraphConfig4(object):
-  name           = "medium4"
+class DesktopCPUConfig(object):
+  name           = "DesktopCPU"
   rnn_neurons    = 500
   batch_size     = 1
   rnn_layers     = 2
   n_outputs      = 4
   n_inputs       = 4
-  initial_lr     = 0.00055   #initial learning rate
-  decay_lr       = 0.93
+  initial_lr     = 0.001   #initial learning rate
+  decay_lr       = 0.99
   keep_prob      = 0.99     # dropout only on RNN layer(s)
-
-class MediumBigGraphConfig(object):
-  name           = "medium-big"
-  rnn_neurons    = 40
-  batch_size     = 400
-  rnn_layers     = 2
-  hidden_layers  = 3   # this is not automated still
-  hidden_neurons = 10
-  n_outputs      = 3
-  n_inputs       = 4
-  initial_lr     = 0.0005   #initial learning rate
-  decay_lr       = 0.9
-  keep_prob      = 0.5     # droput only on RNN layer(s)
+  create_rnn     = lambda:    tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) #tf.nn.relu , use_peepholes=True
 
 
 class GraphWrapper():
-  def __init__(self, graph, init_op, initial_state_placeholder, multi_layer_cell, final_state_op, train_day):
+  def __init__(self, graph, init_op, initial_state_placeholder, multi_layer_cell, final_state_op, train_day, X, y, epoch, loss, outputs, learning_rate, training_op, keep_prob):
      self.graph                     = graph
      self.init_op                   = init_op
      self.initial_state_placeholder = initial_state_placeholder
      self.multi_layer_cell          = multi_layer_cell
      self.final_state_op            = final_state_op
      self.train_day_placeholder     = train_day
+     self.X_placeholder             = X
+     self.y_placeholder             = y
+     self.epoch_placeholder         = epoch
+     self.loss_placeholder          = loss
+     self.outputs_placeholder       = outputs
+     self.learning_rate_placeholder = learning_rate
+     self.training_op_placeholder   = training_op
+     self.keep_prob_placeholder     = keep_prob
+
 
 def build_rnn_time_series_graph(graph_config):
 
-  create_rnn     = lambda:      tf.contrib.rnn.GRUCell(num_units=graph_config.rnn_neurons) #tf.nn.relu , use_peepholes=True
+  create_rnn     = graph_config.create_rnn
   create_dropout = lambda cell: tf.contrib.rnn.DropoutWrapper(cell, input_keep_prob=keep_prob)
 
   graph = tf.Graph()
@@ -138,33 +101,36 @@ def build_rnn_time_series_graph(graph_config):
 
     init = tf.global_variables_initializer()
 
-  return GraphWrapper(graph, init, initial_state_placeholder, multi_layer_cell, final_state, train_day)
+  return GraphWrapper(graph, init, initial_state_placeholder, multi_layer_cell, final_state, train_day, X, y, epoch, loss, outputs, learning_rate, training_op, keep_prob)
 
-def training_iteration(previous_state, iteration, epoch, random_index, train_X, train_y, verify_X, verify_y, graph_wrapper, session, saver, save_dir, file_writer, training_config):
-  graph         = graph_wrapper.graph
+def training_iteration(previous_state, current_learning_rate, iteration, epoch, random_index, train_X, train_y, verify_X, verify_y, graph_wrapper, session, saver, save_dir, file_writer, training_config):
   initial_state_placeholder = graph_wrapper.initial_state_placeholder
   train_day_placeholder     = graph_wrapper.train_day_placeholder
   new_state_op  = graph_wrapper.final_state_op
-  X             = graph.get_tensor_by_name("X:0")
-  y             = graph.get_tensor_by_name("y:0")
-  epoch_holder  = graph.get_tensor_by_name("epoch:0")
-  keep_prob     = graph.get_tensor_by_name("keep_prob:0")
-  loss          = graph.get_tensor_by_name("loss:0")
-  outputs       = graph.get_tensor_by_name("outputs:0")
-  learning_rate = graph.get_tensor_by_name("learning_rate:0")
-  training_op   = graph.get_operation_by_name("training_op")
+  X             = graph_wrapper.X_placeholder
+  y             = graph_wrapper.y_placeholder
+  epoch_holder  = graph_wrapper.epoch_placeholder
+  keep_prob     = graph_wrapper.keep_prob_placeholder
+  loss          = graph_wrapper.loss_placeholder
+  outputs       = graph_wrapper.outputs_placeholder
+  learning_rate = graph_wrapper.learning_rate_placeholder
+  training_op   = graph_wrapper.training_op_placeholder
 
-  current_learning_rate = training_config.initial_lr * (training_config.decay_lr**epoch)
-  train, new_state = session.run([training_op, new_state_op] , feed_dict={X: train_X, y: train_y, keep_prob: training_config.keep_prob, learning_rate: current_learning_rate, initial_state_placeholder: previous_state})
+  train, new_state = session.run([training_op, new_state_op],
+                                      feed_dict={
+                                        X: train_X, y: train_y, keep_prob: training_config.keep_prob,
+                                        learning_rate: current_learning_rate,
+                                        initial_state_placeholder: previous_state})
 
   if iteration % 100 == 0:
     merged  = tf.summary.merge_all()
     summary = session.run(merged,
-                             feed_dict={
-                               X: train_X, y: train_y, keep_prob: 1,
-                               initial_state_placeholder: previous_state, learning_rate: current_learning_rate,
-                               epoch_holder: epoch,
-                               train_day_placeholder: random_index })
+                          feed_dict={
+                             X: train_X, y: train_y, keep_prob: 1,
+                             initial_state_placeholder: previous_state, learning_rate: current_learning_rate,
+                             epoch_holder: epoch,
+                             train_day_placeholder: random_index })
+
     file_writer.add_summary(summary, iteration)
 
   if iteration % 500 == 0:
@@ -184,19 +150,6 @@ def training_iteration(previous_state, iteration, epoch, random_index, train_X, 
 
   return new_state
 
-def prediction(graph, session, X_batch, y_batch):
-  X           = graph.get_tensor_by_name("X:0")
-  y           = graph.get_tensor_by_name("y:0")
-  outputs     = graph.get_tensor_by_name("outputs:0")
-  loss        = graph.get_tensor_by_name("loss:0")
-  mse         = loss.eval(feed_dict={X: X_batch, y: y_batch})
-  print(X_batch)
-  print(y_batch)
-  print(session.run(outputs, feed_dict={X: X_batch}))
-  print("MSE: ", mse)
-
-
-
 def main(_):
 
   is_training, is_continue, restore_name, start_day_input, end_day_input = time_series_data.parse_cmdline(sys.argv)
@@ -205,7 +158,7 @@ def main(_):
     print("wrong usage")
     os.exit(1)
 
-  training_config  = MediumGraphConfig4()
+  training_config  = DesktopCPUConfig()
 
   # @TODO: need to redo those CMD params logic when they grow in number. Just stick to the bruteforce IF power
   if is_training or is_continue:
@@ -251,8 +204,9 @@ def main(_):
 
           print("Training ", epoch, "epoch, with train set len of: ", data_batch_size, " iterations, current data batch: ",data_batch, ' / ', data_batches_count, ' simulating day no. ', random_index)
 
+          current_learning_rate = training_config.initial_lr * (training_config.decay_lr**epoch)
           for data_iteration in range(data_batch_size):
-            previous_state_value = training_iteration(previous_state_value, epoch_iteration, epoch, random_index, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], verification_X[0], verification_y[0], graph_wrapper, sess, saver, save_dir, file_writer, training_config)
+            previous_state_value = training_iteration(previous_state_value, current_learning_rate, epoch_iteration, epoch, random_index, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], verification_X[0], verification_y[0], graph_wrapper, sess, saver, save_dir, file_writer, training_config)
             epoch_iteration += 1
         file_writer.close()
         saver.save(sess, save_dir + "model_final_" + str(epoch) + ".ckpt")
@@ -270,3 +224,17 @@ def main(_):
 
 if __name__ == "__main__":
   tf.app.run()
+
+
+
+def prediction(graph, session, X_batch, y_batch):
+  X           = graph.get_tensor_by_name("X:0")
+  y           = graph.get_tensor_by_name("y:0")
+  outputs     = graph.get_tensor_by_name("outputs:0")
+  loss        = graph.get_tensor_by_name("loss:0")
+  mse         = loss.eval(feed_dict={X: X_batch, y: y_batch})
+  print(X_batch)
+  print(y_batch)
+  print(session.run(outputs, feed_dict={X: X_batch}))
+  print("MSE: ", mse)
+
