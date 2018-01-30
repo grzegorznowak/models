@@ -104,7 +104,7 @@ def get_random_data_batch_from_folder(batch_size, verification_batches):
   files     = get_files_in_folder()
   random_index = random.randint(0, len(files) -1)
 
-  return get_data_batch_from_folder(random_index, batch_size, verification_batches)
+  return get_data_batch_from_folder(random_index, batch_size, verification_batches), random_index
 
 def get_data_batch_from_folder(index, batch_size, verification_batches):
   directory = data_folder

@@ -38,7 +38,7 @@ class MediumGraphConfig2(object):
   rnn_layers     = 2
   n_outputs      = 3
   n_inputs       = 4
-  initial_lr     = 0.001   #initial learning rate
+  initial_lr     = 0.0009   #initial learning rate
   decay_lr       = 0.99
   keep_prob      = 0.95     # droput only on RNN layer(s)
 
@@ -61,7 +61,7 @@ class MediumGraphConfig4(object):
   rnn_layers     = 2
   n_outputs      = 4
   n_inputs       = 4
-  initial_lr     = 0.001   #initial learning rate
+  initial_lr     = 0.00055   #initial learning rate
   decay_lr       = 0.93
   keep_prob      = 0.99     # dropout only on RNN layer(s)
 
@@ -80,12 +80,13 @@ class MediumBigGraphConfig(object):
 
 
 class GraphWrapper():
-  def __init__(self, graph, init_op, initial_state_placeholder, multi_layer_cell, final_state_op):
+  def __init__(self, graph, init_op, initial_state_placeholder, multi_layer_cell, final_state_op, train_day):
      self.graph                     = graph
      self.init_op                   = init_op
      self.initial_state_placeholder = initial_state_placeholder
      self.multi_layer_cell          = multi_layer_cell
      self.final_state_op            = final_state_op
+     self.train_day_placeholder     = train_day
 
 def build_rnn_time_series_graph(graph_config):
 
@@ -101,6 +102,7 @@ def build_rnn_time_series_graph(graph_config):
     y              = tf.placeholder(tf.float32, [None, graph_config.batch_size, graph_config.n_outputs], name="y")
     learning_rate  = tf.placeholder(tf.float32, None, name="learning_rate")
     epoch          = tf.placeholder(tf.int16  , name="epoch")
+    train_day      = tf.placeholder(tf.int16  , name="train_day")
 
     cell_layers    = [create_rnn() for _ in range(graph_config.rnn_layers)]
     dropout_layers = list(map(create_dropout, cell_layers))
@@ -128,6 +130,7 @@ def build_rnn_time_series_graph(graph_config):
 
     tf.summary.scalar("learning_rate", learning_rate)
     tf.summary.scalar("epoch"        , epoch)
+    tf.summary.scalar("train_day"    , train_day)
     tf.summary.scalar("mse_summary"  , loss)
 
     tf.summary.histogram("weights_output", outputs)
@@ -135,11 +138,12 @@ def build_rnn_time_series_graph(graph_config):
 
     init = tf.global_variables_initializer()
 
-  return GraphWrapper(graph, init, initial_state_placeholder, multi_layer_cell, final_state)
+  return GraphWrapper(graph, init, initial_state_placeholder, multi_layer_cell, final_state, train_day)
 
-def training_iteration(previous_state, iteration, epoch, train_X, train_y, verify_X, verify_y, graph_wrapper, session, saver, save_dir, file_writer, training_config):
+def training_iteration(previous_state, iteration, epoch, random_index, train_X, train_y, verify_X, verify_y, graph_wrapper, session, saver, save_dir, file_writer, training_config):
   graph         = graph_wrapper.graph
   initial_state_placeholder = graph_wrapper.initial_state_placeholder
+  train_day_placeholder     = graph_wrapper.train_day_placeholder
   new_state_op  = graph_wrapper.final_state_op
   X             = graph.get_tensor_by_name("X:0")
   y             = graph.get_tensor_by_name("y:0")
@@ -154,22 +158,25 @@ def training_iteration(previous_state, iteration, epoch, train_X, train_y, verif
   train, new_state = session.run([training_op, new_state_op] , feed_dict={X: train_X, y: train_y, keep_prob: training_config.keep_prob, learning_rate: current_learning_rate, initial_state_placeholder: previous_state})
 
   if iteration % 100 == 0:
-    mse        = session.run(loss, feed_dict={X: train_X, y: train_y, keep_prob: 1, initial_state_placeholder: previous_state})
-    verify_mse = session.run(loss, feed_dict={X: verify_X, y: verify_y, keep_prob: 1, initial_state_placeholder: previous_state})
-    merged     = tf.summary.merge_all()
-    summary    = session.run(merged,
+    merged  = tf.summary.merge_all()
+    summary = session.run(merged,
                              feed_dict={
                                X: train_X, y: train_y, keep_prob: 1,
                                initial_state_placeholder: previous_state, learning_rate: current_learning_rate,
-                               epoch_holder: epoch })
-    train_response  = session.run(outputs, feed_dict={X: train_X, keep_prob: 1, initial_state_placeholder: previous_state})
+                               epoch_holder: epoch,
+                               train_day_placeholder: random_index })
     file_writer.add_summary(summary, iteration)
+
+  if iteration % 500 == 0:
+    mse             = session.run(loss, feed_dict={X: train_X, y: train_y, keep_prob: 1, initial_state_placeholder: previous_state})
+   # verify_mse     = session.run(loss, feed_dict={X: verify_X, y: verify_y, keep_prob: 1, initial_state_placeholder: previous_state})
+    train_response  = session.run(outputs, feed_dict={X: train_X, keep_prob: 1, initial_state_placeholder: previous_state})
 
     print("epoch: ", epoch, "iteration: ", iteration)
     print("train_y: \n"  , train_y)
     print("train_response: \n "  , train_response)
     print("\tMSE:"             , mse)
-    print("\tVerification MSE:", verify_mse)
+   #print("\tVerification MSE:", verify_mse)
     print("current LR: ", current_learning_rate)
 
   if iteration % 5000 == 0:  # save network rarily
@@ -231,9 +238,10 @@ def main(_):
       for epoch in range(epochs):
         log_dir     = "{}/run-{}-{}-{}/".format('/tmp/time_series_logdir', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
         save_dir    = "{}/run-{}-{}-{}/".format('/tmp/time_series', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
+        file_writer = tf.summary.FileWriter(log_dir, tf.get_default_graph())
         epoch_iteration = 0
         for data_batch in range(start_day, end_day):
-          train_X, train_y, verification_X, verification_y = time_series_data.get_random_data_batch_from_folder(training_config.batch_size,  1)
+          (train_X, train_y, verification_X, verification_y), random_index = time_series_data.get_random_data_batch_from_folder(training_config.batch_size,  1)
           data_batch_size  = len(train_X) - 1
           inital_state_placeholder = graph_wrapper.initial_state_placeholder
 
@@ -241,11 +249,12 @@ def main(_):
           previous_state = graph_wrapper.multi_layer_cell.zero_state(training_config.batch_size, tf.float32)
           previous_state_value = np.zeros((1,training_config.rnn_neurons * training_config.rnn_layers))
 
-          print("Training ", epoch, "epoch, with train set len of: ", data_batch_size, " iterations, current data batch: ",data_batch, ' / ', data_batches_count)
-          file_writer = tf.summary.FileWriter(log_dir, tf.get_default_graph())
+          print("Training ", epoch, "epoch, with train set len of: ", data_batch_size, " iterations, current data batch: ",data_batch, ' / ', data_batches_count, ' simulating day no. ', random_index)
+
           for data_iteration in range(data_batch_size):
-            previous_state_value = training_iteration(previous_state_value, epoch_iteration, epoch, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], verification_X[0], verification_y[0], graph_wrapper, sess, saver, save_dir, file_writer, training_config)
+            previous_state_value = training_iteration(previous_state_value, epoch_iteration, epoch, random_index, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], verification_X[0], verification_y[0], graph_wrapper, sess, saver, save_dir, file_writer, training_config)
             epoch_iteration += 1
+        file_writer.close()
         saver.save(sess, save_dir + "model_final_" + str(epoch) + ".ckpt")
 
   else:
