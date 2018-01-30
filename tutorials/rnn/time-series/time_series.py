@@ -17,7 +17,8 @@ class LaptopCPUConfig(object):
   initial_lr     = 0.001   #initial learning rate
   decay_lr       = 0.99
   keep_prob      = 0.5     # dropout only on RNN layer(s)
-  create_rnn     = lambda:    tf.contrib.rnn.RNNCell(num_units=self.rnn_neurons) # try using faster cells
+  def create_rnn(self):
+    return tf.contrib.rnn.RNNCell(num_units=self.rnn_neurons) # try using faster cells
 
 
 class DesktopCPUConfig(object):
