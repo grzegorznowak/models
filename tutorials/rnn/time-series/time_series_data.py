@@ -9,6 +9,12 @@ data_file = os.path.join("/mnt/c/Users/grzegorz/workspace/mql-csv-export/Data/",
 # data_folder = os.path.join("/mnt/c/Users/grzegorz/AppData/Roaming/MetaQuotes/Terminal/3BD2B5E5A5264AFE17C1E2DDC7D6B381/tester/files/mt4_EURUSD_1__range_1_UNnormalized_NOdatetime_8-17_1-5_OHCLT_train_data")
 data_folder = os.path.join("/mnt/c/Users/grzegorz/AppData/Roaming/MetaQuotes/Terminal/3BD2B5E5A5264AFE17C1E2DDC7D6B381/tester/files/mt4_EURUSD_1__range_1_UNnormalized_NOdatetime_0-24_1-5_OHCLT_train_data")
 
+def get_files_in_folder():
+  directory = os.fsencode(data_folder)
+  return os.listdir(directory)
+
+files     = get_files_in_folder()
+
 def get_shuffled_training_set(from_page, page_size, batch_size, verification_batches):
   return get_data_batches(from_page, page_size, batch_size, verification_batches)
   # dont shuffle for now, for easier insight into learning issues
@@ -53,10 +59,10 @@ def get_data_from_file(filename, batch_size, verification_batches):
 
   # split into items of input_size
   X_train_batches = np.array([[training_seq[i : batch_size + i]]
-                              for i in range(len(training_seq) - batch_size - 1)])
+                              for i in range(0, len(training_seq) - batch_size - 1, batch_size)])
 
   y_train_batches = np.array([[training_seq[i + 1 : batch_size + i + 1]]
-                              for i in range(len(training_seq) - batch_size)])
+                              for i in range(0, len(training_seq) - batch_size, batch_size)])
 
 
   return X_train_batches, y_train_batches, X_train_batches, y_train_batches
@@ -93,22 +99,19 @@ def parse_cmdline(ars):
 
   return is_training, is_continue, restore_name, start_day_input, end_day_input
 
-def get_files_in_folder():
-  directory = os.fsencode(data_folder)
-  return os.listdir(directory)
 
 def get_total_data_batches_count_in_folder():
-  return len(get_files_in_folder())
+  return len(files)
 
 def get_random_data_batch_from_folder(batch_size, verification_batches):
-  files     = get_files_in_folder()
+
   random_index = random.randint(0, len(files) -1)
 
   return get_data_batch_from_folder(random_index, batch_size, verification_batches), random_index
 
 def get_data_batch_from_folder(index, batch_size, verification_batches):
   directory = data_folder
-  files     = get_files_in_folder()
+ # files     = get_files_in_folder()
   filename  = os.fsdecode(files[index])
 
   print(filename)

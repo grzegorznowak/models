@@ -22,7 +22,7 @@ from __future__ import print_function
 import os.path
 
 import tensorflow as tf
-from time_series_data import get_shuffled_training_set
+from time_series_data import get_random_data_batch_from_folder
 
 
 class TimesSeriesReaderTest(tf.test.TestCase):
@@ -36,16 +36,12 @@ class TimesSeriesReaderTest(tf.test.TestCase):
 
 
   def testCsvReading(self):
-    X, y, vX, vy = get_shuffled_training_set(5, 5)
+    (X, y, vX, vy), random_index = get_random_data_batch_from_folder(4, 5)
 
-    print(X[0])
-    print(y[0])
+    print(X[-1])
+    print(y[-1])
+    print(random_index)
 
-    print(X[10])
-    print(y[10])
-
-    print(vX[0])
-    print(vy[0])
 
 
 if __name__ == "__main__":

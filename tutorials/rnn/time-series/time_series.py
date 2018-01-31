@@ -5,7 +5,12 @@ import time_series_data
 
 from random   import randint
 from datetime import datetime
+from pympler import tracker
+from pympler import summary
+from pympler import muppy
 
+
+tr = tracker.SummaryTracker()
 
 class LaptopCPUConfig(object):
   name           = "LaptopCPU"
@@ -24,11 +29,11 @@ class LaptopCPUConfig(object):
 class DesktopCPUConfig(object):
   name           = "DesktopCPU"
   rnn_neurons    = 500
-  batch_size     = 1
+  batch_size     = 6
   rnn_layers     = 2
   n_outputs      = 4
   n_inputs       = 4
-  initial_lr     = 0.001   #initial learning rate
+  initial_lr     = 0.0088   #initial learning rate
   decay_lr       = 0.99
   keep_prob      = 0.99     # dropout only on RNN layer(s)
 
@@ -140,7 +145,7 @@ def training_iteration(previous_state, current_learning_rate, iteration, epoch, 
    # verify_mse     = session.run(loss, feed_dict={X: verify_X, y: verify_y, keep_prob: 1, initial_state_placeholder: previous_state})
     train_response  = session.run(outputs, feed_dict={X: train_X, keep_prob: 1, initial_state_placeholder: previous_state})
 
-    print("epoch: ", epoch, "iteration: ", iteration)
+    print("epoch: ", epoch, ", (ticks) iteration: ", iteration)
     print("train_y: \n"  , train_y)
     print("train_response: \n "  , train_response)
     print("\tMSE:"             , mse)
@@ -197,11 +202,7 @@ def main(_):
         epoch_iteration = 0
         for data_batch in range(start_day, end_day):
           (train_X, train_y, verification_X, verification_y), random_index = time_series_data.get_random_data_batch_from_folder(training_config.batch_size,  1)
-          data_batch_size  = len(train_X) - 1
-          inital_state_placeholder = graph_wrapper.initial_state_placeholder
-
-
-          previous_state = graph_wrapper.multi_layer_cell.zero_state(training_config.batch_size, tf.float32)
+          data_batch_size      = len(train_X) - 1
           previous_state_value = np.zeros((1,training_config.rnn_neurons * training_config.rnn_layers))
 
           print("Training ", epoch, "epoch, with train set len of: ", data_batch_size, " iterations, current data batch: ",data_batch, ' / ', data_batches_count, ' simulating day no. ', random_index)
@@ -209,7 +210,13 @@ def main(_):
           current_learning_rate = training_config.initial_lr * (training_config.decay_lr**epoch)
           for data_iteration in range(data_batch_size):
             previous_state_value = training_iteration(previous_state_value, current_learning_rate, epoch_iteration, epoch, random_index, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], verification_X[0], verification_y[0], graph_wrapper, sess, saver, save_dir, file_writer, training_config)
-            epoch_iteration += 1
+            epoch_iteration += training_config.batch_size
+
+
+#          all_objects = muppy.get_objects()
+#          objects = summary.summarize(all_objects)
+#          summary.print_(objects)
+#          tr.print_diff()
         file_writer.close()
         saver.save(sess, save_dir + "model_final_" + str(epoch) + ".ckpt")
 
