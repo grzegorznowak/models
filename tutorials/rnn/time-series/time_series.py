@@ -1,3 +1,4 @@
+import gc
 import sys
 import numpy as np
 import tensorflow as tf
@@ -33,16 +34,30 @@ class DesktopCPUConfig(object):
   rnn_layers     = 2
   n_outputs      = 4
   n_inputs       = 4
-  initial_lr     = 0.0088   #initial learning rate
+  initial_lr     = 0.0085   #initial learning rate
   decay_lr       = 0.99
   keep_prob      = 0.99     # dropout only on RNN layer(s)
 
   def create_rnn(self):
     return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) #tf.nn.relu , use_peepholes=True
 
+class DesktopCPUConfig2(object):
+  name           = "DesktopCPU2"
+  rnn_neurons    = 500
+  batch_size     = 12
+  rnn_layers     = 4
+  n_outputs      = 4
+  n_inputs       = 4
+  initial_lr     = 0.001   #initial learning rate
+  decay_lr       = 0.99
+  keep_prob      = 0.75     # dropout only on RNN layer(s)
+
+  def create_rnn(self):
+    return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) #tf.nn.relu , use_peepholes=True
+
 
 class GraphWrapper():
-  def __init__(self, graph, init_op, initial_state_placeholder, multi_layer_cell, final_state_op, train_day, X, y, epoch, loss, outputs, learning_rate, training_op, keep_prob):
+  def __init__(self, graph, init_op, initial_state_placeholder, multi_layer_cell, final_state_op, train_day, X, y, epoch, loss, outputs, learning_rate, training_op, keep_prob, summary_op):
      self.graph                     = graph
      self.init_op                   = init_op
      self.initial_state_placeholder = initial_state_placeholder
@@ -57,6 +72,7 @@ class GraphWrapper():
      self.learning_rate_placeholder = learning_rate
      self.training_op_placeholder   = training_op
      self.keep_prob_placeholder     = keep_prob
+     self.summary_op                = summary_op
 
 
 def build_rnn_time_series_graph(graph_config):
@@ -108,7 +124,9 @@ def build_rnn_time_series_graph(graph_config):
 
     init = tf.global_variables_initializer()
 
-  return GraphWrapper(graph, init, initial_state_placeholder, multi_layer_cell, final_state, train_day, X, y, epoch, loss, outputs, learning_rate, training_op, keep_prob)
+    summary_op = tf.summary.merge_all()
+
+  return GraphWrapper(graph, init, initial_state_placeholder, multi_layer_cell, final_state, train_day, X, y, epoch, loss, outputs, learning_rate, training_op, keep_prob, summary_op)
 
 def training_iteration(previous_state, current_learning_rate, iteration, epoch, random_index, train_X, train_y, verify_X, verify_y, graph_wrapper, session, saver, save_dir, file_writer, training_config):
   initial_state_placeholder = graph_wrapper.initial_state_placeholder
@@ -130,8 +148,7 @@ def training_iteration(previous_state, current_learning_rate, iteration, epoch, 
                                         initial_state_placeholder: previous_state})
 
   if iteration % 100 == 0:
-    merged  = tf.summary.merge_all()
-    summary = session.run(merged,
+    summary = session.run(graph_wrapper.summary_op,
                           feed_dict={
                              X: train_X, y: train_y, keep_prob: 1,
                              initial_state_placeholder: previous_state, learning_rate: current_learning_rate,
@@ -165,7 +182,7 @@ def main(_):
     print("wrong usage")
     os.exit(1)
 
-  training_config  = DesktopCPUConfig()
+  training_config  = DesktopCPUConfig2()
 
   # @TODO: need to redo those CMD params logic when they grow in number. Just stick to the bruteforce IF power
   if is_training or is_continue:
@@ -212,13 +229,13 @@ def main(_):
             previous_state_value = training_iteration(previous_state_value, current_learning_rate, epoch_iteration, epoch, random_index, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], verification_X[0], verification_y[0], graph_wrapper, sess, saver, save_dir, file_writer, training_config)
             epoch_iteration += training_config.batch_size
 
-
 #          all_objects = muppy.get_objects()
 #          objects = summary.summarize(all_objects)
 #          summary.print_(objects)
 #          tr.print_diff()
         file_writer.close()
         saver.save(sess, save_dir + "model_final_" + str(epoch) + ".ckpt")
+
 
   else:
     restore_name = sys.argv[1]
