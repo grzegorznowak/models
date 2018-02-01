@@ -9,7 +9,7 @@ from datetime import datetime
 from pympler import tracker
 from pympler import summary
 from pympler import muppy
-
+from functools import lru_cache
 
 tr = tracker.SummaryTracker()
 
@@ -34,7 +34,7 @@ class DesktopCPUConfig(object):
   rnn_layers     = 2
   n_outputs      = 4
   n_inputs       = 4
-  initial_lr     = 0.0085   #initial learning rate
+  initial_lr     = 0.00085   #initial learning rate
   decay_lr       = 0.99
   keep_prob      = 0.99     # dropout only on RNN layer(s)
 
@@ -43,17 +43,17 @@ class DesktopCPUConfig(object):
 
 class DesktopCPUConfig2(object):
   name           = "DesktopCPU2"
-  rnn_neurons    = 500
-  batch_size     = 12
-  rnn_layers     = 4
-  n_outputs      = 4
-  n_inputs       = 4
-  initial_lr     = 0.001   #initial learning rate
+  rnn_neurons    = 800
+  batch_size     = 16
+  rnn_layers     = 3
+  n_inputs       = 6
+  n_outputs      = 3
+  initial_lr     = 0.0007   #initial learning rate
   decay_lr       = 0.99
-  keep_prob      = 0.75     # dropout only on RNN layer(s)
+  keep_prob      = 0.6     # dropout only on RNN layer(s)
 
   def create_rnn(self):
-    return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) #tf.nn.relu , use_peepholes=True
+    return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) # try using faster cells
 
 
 class GraphWrapper():
@@ -105,7 +105,8 @@ def build_rnn_time_series_graph(graph_config):
                                      name="outputs")
 
     loss       = tf.reduce_mean(tf.square(outputs - y), name="loss")
-    optimizer  = tf.train.AdamOptimizer(learning_rate=learning_rate)
+    #optimizer  = tf.train.AdamOptimizer(learning_rate=learning_rate)
+    optimizer  = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
 
   #  gvs        = optimizer.compute_gradients(loss)
   #  capped_gvs = [(tf.clip_by_value(grad, -20., 20.), var) for grad, var in gvs]
@@ -116,7 +117,7 @@ def build_rnn_time_series_graph(graph_config):
 
     tf.summary.scalar("learning_rate", learning_rate)
     tf.summary.scalar("epoch"        , epoch)
-    tf.summary.scalar("train_day"    , train_day)
+    tf.summary.histogram("train_day"    , train_day)
     tf.summary.scalar("mse_summary"  , loss)
 
     tf.summary.histogram("weights_output", outputs)
@@ -128,7 +129,41 @@ def build_rnn_time_series_graph(graph_config):
 
   return GraphWrapper(graph, init, initial_state_placeholder, multi_layer_cell, final_state, train_day, X, y, epoch, loss, outputs, learning_rate, training_op, keep_prob, summary_op)
 
-def training_iteration(previous_state, current_learning_rate, iteration, epoch, random_index, train_X, train_y, verify_X, verify_y, graph_wrapper, session, saver, save_dir, file_writer, training_config):
+
+
+def measure_performance(zero_state, X, y, graph_wrapper, sess, verification_day_index):
+
+  print("\tMeasuring performance based on a sample from the day of index ", verification_day_index, "\n")
+
+  X_placeholder = graph_wrapper.X_placeholder
+  y_placeholder = graph_wrapper.y_placeholder
+  outputs       = graph_wrapper.outputs_placeholder
+  loss          = graph_wrapper.loss_placeholder
+  keep_prob     = graph_wrapper.keep_prob_placeholder
+  new_state_op  = graph_wrapper.final_state_op
+  initial_state_placeholder = graph_wrapper.initial_state_placeholder
+
+  next_state = zero_state
+  sum_mse    = 0
+  for batch_number in range(len(X)):
+    mse, next_state, train_response = sess.run([loss, new_state_op, outputs],
+                                               feed_dict={X_placeholder: X[batch_number],
+                                                          y_placeholder: y[batch_number],
+                                                          keep_prob: 1,
+                                                          initial_state_placeholder: next_state})
+    sum_mse += mse
+
+    if batch_number % 10 == 0: # print out details only every 10
+      print("Verification batch number: ", batch_number,
+          "\tvY vs vResp:\t",
+          y[batch_number][-1][-1], "\t<->", train_response[-1][-1],
+          "\tBatch MSE: ", mse)
+
+
+  print("\nTOTAL Average Verfication MSE: \t", sum_mse / len(X), "\n")
+
+
+def training_iteration(previous_state, current_learning_rate, iteration, epoch, random_index, train_X, train_y, graph_wrapper, session, saver, save_dir, file_writer, training_config):
   initial_state_placeholder = graph_wrapper.initial_state_placeholder
   train_day_placeholder     = graph_wrapper.train_day_placeholder
   new_state_op  = graph_wrapper.final_state_op
@@ -136,16 +171,15 @@ def training_iteration(previous_state, current_learning_rate, iteration, epoch, 
   y             = graph_wrapper.y_placeholder
   epoch_holder  = graph_wrapper.epoch_placeholder
   keep_prob     = graph_wrapper.keep_prob_placeholder
-  loss          = graph_wrapper.loss_placeholder
-  outputs       = graph_wrapper.outputs_placeholder
   learning_rate = graph_wrapper.learning_rate_placeholder
   training_op   = graph_wrapper.training_op_placeholder
+  outputs       = graph_wrapper.outputs_placeholder
+  loss          = graph_wrapper.loss_placeholder
 
   train, new_state = session.run([training_op, new_state_op],
-                                      feed_dict={
-                                        X: train_X, y: train_y, keep_prob: training_config.keep_prob,
-                                        learning_rate: current_learning_rate,
-                                        initial_state_placeholder: previous_state})
+                                      feed_dict={X: train_X, y: train_y, keep_prob: training_config.keep_prob,
+                                                 learning_rate: current_learning_rate,
+                                                 initial_state_placeholder: previous_state})
 
   if iteration % 100 == 0:
     summary = session.run(graph_wrapper.summary_op,
@@ -157,7 +191,7 @@ def training_iteration(previous_state, current_learning_rate, iteration, epoch, 
 
     file_writer.add_summary(summary, iteration)
 
-  if iteration % 500 == 0:
+  if iteration % 1000 == 0:
     mse             = session.run(loss, feed_dict={X: train_X, y: train_y, keep_prob: 1, initial_state_placeholder: previous_state})
    # verify_mse     = session.run(loss, feed_dict={X: verify_X, y: verify_y, keep_prob: 1, initial_state_placeholder: previous_state})
     train_response  = session.run(outputs, feed_dict={X: train_X, keep_prob: 1, initial_state_placeholder: previous_state})
@@ -194,7 +228,7 @@ def main(_):
     with training_session as sess:
 
       saver = tf.train.Saver(max_to_keep=0)
-      data_batches_count = time_series_data.get_total_data_batches_count_in_folder()
+      data_batches_count = time_series_data.get_total_data_batches_count_in_train_folder()
 
       # it doesn't mean that much anymore, but is a good heuristic to skip to another epoch after
       # data_batches_count worth of samples has passed by
@@ -209,6 +243,10 @@ def main(_):
 
       print("data_batches_count in folder", data_batches_count)
 
+      @lru_cache(maxsize=2)
+      def zero_state():
+        return np.zeros((1,training_config.rnn_neurons * training_config.rnn_layers))
+
       start_day = int(start_day_input)
       if int(end_day_input):
         end_day =  int(end_day_input)
@@ -217,22 +255,26 @@ def main(_):
         save_dir    = "{}/run-{}-{}-{}/".format('/tmp/time_series', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
         file_writer = tf.summary.FileWriter(log_dir, tf.get_default_graph())
         epoch_iteration = 0
+        current_learning_rate = training_config.initial_lr * (training_config.decay_lr**epoch)
+        (verification_X, verification_y), verification_day_index = time_series_data.get_random_data_batch_from_verification_folder(training_config.batch_size)
+
         for data_batch in range(start_day, end_day):
-          (train_X, train_y, verification_X, verification_y), random_index = time_series_data.get_random_data_batch_from_folder(training_config.batch_size,  1)
+          (train_X, train_y), random_index = time_series_data.get_random_data_batch_from_folder(training_config.batch_size)
           data_batch_size      = len(train_X) - 1
-          previous_state_value = np.zeros((1,training_config.rnn_neurons * training_config.rnn_layers))
+          previous_state_value = zero_state()
 
-          print("Training ", epoch, "epoch, with train set len of: ", data_batch_size, " iterations, current data batch: ",data_batch, ' / ', data_batches_count, ' simulating day no. ', random_index)
+          print("Training ", epoch, "epoch, \tlearning rate:", current_learning_rate,"\ttrain set len of: ", data_batch_size,
+                " iterations, \ncurrent data batch: ",data_batch, ' / ', data_batches_count, ' simulating day no. ', random_index)
 
-          current_learning_rate = training_config.initial_lr * (training_config.decay_lr**epoch)
+
           for data_iteration in range(data_batch_size):
-            previous_state_value = training_iteration(previous_state_value, current_learning_rate, epoch_iteration, epoch, random_index, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], verification_X[0], verification_y[0], graph_wrapper, sess, saver, save_dir, file_writer, training_config)
+            previous_state_value = training_iteration(previous_state_value, current_learning_rate, epoch_iteration, epoch, random_index, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], graph_wrapper, sess, saver, save_dir, file_writer, training_config)
             epoch_iteration += training_config.batch_size
 
-#          all_objects = muppy.get_objects()
-#          objects = summary.summarize(all_objects)
-#          summary.print_(objects)
-#          tr.print_diff()
+          if data_batch % 5 == 0:
+            # print out verfication stats every a few days worth of training
+            measure_performance(zero_state(), verification_X, verification_y, graph_wrapper, sess, verification_day_index)
+
         file_writer.close()
         saver.save(sess, save_dir + "model_final_" + str(epoch) + ".ckpt")
 
@@ -245,22 +287,10 @@ def main(_):
     with prediction_session as sess:
       saver = tf.train.Saver(max_to_keep=0)
       saver.restore(sess, restore_name)
-      prediction(prediction_graph, sess, verification_X[0], verification_y[0])
+      measure_performance(prediction_graph, sess, verification_X[0], verification_y[0])
 
 
 if __name__ == "__main__":
   tf.app.run()
 
-
-
-def prediction(graph, session, X_batch, y_batch):
-  X           = graph.get_tensor_by_name("X:0")
-  y           = graph.get_tensor_by_name("y:0")
-  outputs     = graph.get_tensor_by_name("outputs:0")
-  loss        = graph.get_tensor_by_name("loss:0")
-  mse         = loss.eval(feed_dict={X: X_batch, y: y_batch})
-  print(X_batch)
-  print(y_batch)
-  print(session.run(outputs, feed_dict={X: X_batch}))
-  print("MSE: ", mse)
 
