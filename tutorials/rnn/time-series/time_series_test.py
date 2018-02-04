@@ -35,14 +35,19 @@ class TimesSeriesReaderTest(tf.test.TestCase):
     self._string_data = '\n'.join(map(','.join, self.RawData))
 
 
+
+
   def testCsvReading(self):
 
-    for _ in range(10):
-      (X, y), random_index = get_random_data_batch_from_folder(4)
+    gg = [1,2,3,4,5]
 
-      print(X[-1])
-      print(y[-1])
-      print(random_index)
+    print(gg[1:3])
+    # for _ in range(10):
+    #   (X, y), random_index = get_random_data_batch_from_folder(4)
+    #
+    #   print(X[-1])
+    #   print(y[-1])
+    #   print(random_index)
 
 
 

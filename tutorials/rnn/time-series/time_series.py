@@ -34,7 +34,7 @@ class DesktopCPUConfig(object):
   rnn_layers     = 2
   n_outputs      = 4
   n_inputs       = 4
-  initial_lr     = 0.00085   #initial learning rate
+  initial_lr     = 0.0005   #initial learning rate
   decay_lr       = 0.99
   keep_prob      = 0.99     # dropout only on RNN layer(s)
 
@@ -43,17 +43,17 @@ class DesktopCPUConfig(object):
 
 class DesktopCPUConfig2(object):
   name           = "DesktopCPU2"
-  rnn_neurons    = 800
+  rnn_neurons    = 300
   batch_size     = 16
   rnn_layers     = 3
   n_inputs       = 6
   n_outputs      = 3
-  initial_lr     = 0.0007   #initial learning rate
-  decay_lr       = 0.99
-  keep_prob      = 0.6     # dropout only on RNN layer(s)
+  initial_lr     = 0.0005   #initial learning rate
+  decay_lr       = 0.9
+  keep_prob      = 1     # dropout only on RNN layer(s)
 
   def create_rnn(self):
-    return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) # try using faster cells
+    return tf.contrib.rnn.GRUBlockCellV2(num_units=self.rnn_neurons) # try using faster cells
 
 
 class GraphWrapper():
@@ -104,9 +104,9 @@ def build_rnn_time_series_graph(graph_config):
                                      [-1, graph_config.batch_size, graph_config.n_outputs],
                                      name="outputs")
 
-    loss       = tf.reduce_mean(tf.square(outputs - y), name="loss")
-    #optimizer  = tf.train.AdamOptimizer(learning_rate=learning_rate)
-    optimizer  = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
+    loss       = tf.losses.mean_squared_error(y , outputs)
+    optimizer  = tf.train.AdamOptimizer(learning_rate=learning_rate)
+    #optimizer  = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
 
   #  gvs        = optimizer.compute_gradients(loss)
   #  capped_gvs = [(tf.clip_by_value(grad, -20., 20.), var) for grad, var in gvs]
@@ -191,19 +191,16 @@ def training_iteration(previous_state, current_learning_rate, iteration, epoch, 
 
     file_writer.add_summary(summary, iteration)
 
-  if iteration % 1000 == 0:
+  if iteration % 2000 == 0:
     mse             = session.run(loss, feed_dict={X: train_X, y: train_y, keep_prob: 1, initial_state_placeholder: previous_state})
    # verify_mse     = session.run(loss, feed_dict={X: verify_X, y: verify_y, keep_prob: 1, initial_state_placeholder: previous_state})
     train_response  = session.run(outputs, feed_dict={X: train_X, keep_prob: 1, initial_state_placeholder: previous_state})
 
     print("epoch: ", epoch, ", (ticks) iteration: ", iteration)
-    print("train_y: \n"  , train_y)
-    print("train_response: \n "  , train_response)
-    print("\tMSE:"             , mse)
-   #print("\tVerification MSE:", verify_mse)
+    print("last train_y vs output: \n"  , train_y[-1][-1], "\t -> \t", train_response[-1][-1], "\tMSE:"  , mse)
     print("current LR: ", current_learning_rate)
 
-  if iteration % 5000 == 0:  # save network rarily
+  if iteration % 100000 == 0:  # save network rarily
     saver.save(session, save_dir + "model_" + str(iteration) + "_" + str(epoch) + ".ckpt")
 
   return new_state
@@ -259,19 +256,19 @@ def main(_):
         (verification_X, verification_y), verification_day_index = time_series_data.get_random_data_batch_from_verification_folder(training_config.batch_size)
 
         for data_batch in range(start_day, end_day):
-          (train_X, train_y), random_index = time_series_data.get_random_data_batch_from_folder(training_config.batch_size)
+          train_X, train_y = time_series_data.get_train_data_batch_from_folder(data_batch, training_config.batch_size)
           data_batch_size      = len(train_X) - 1
           previous_state_value = zero_state()
 
           print("Training ", epoch, "epoch, \tlearning rate:", current_learning_rate,"\ttrain set len of: ", data_batch_size,
-                " iterations, \ncurrent data batch: ",data_batch, ' / ', data_batches_count, ' simulating day no. ', random_index)
+                " iterations, \ncurrent data batch: ",data_batch, ' / ', data_batches_count, ' simulating day no. ', data_batch)
 
 
           for data_iteration in range(data_batch_size):
-            previous_state_value = training_iteration(previous_state_value, current_learning_rate, epoch_iteration, epoch, random_index, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], graph_wrapper, sess, saver, save_dir, file_writer, training_config)
+            previous_state_value = training_iteration(previous_state_value, current_learning_rate, epoch_iteration, epoch, data_batch, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], graph_wrapper, sess, saver, save_dir, file_writer, training_config)
             epoch_iteration += training_config.batch_size
 
-          if data_batch % 5 == 0:
+          if data_batch % 4 == 0:
             # print out verfication stats every a few days worth of training
             measure_performance(zero_state(), verification_X, verification_y, graph_wrapper, sess, verification_day_index)
 

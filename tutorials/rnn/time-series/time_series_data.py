@@ -61,7 +61,7 @@ def get_data_from_file(filename, batch_size):
   X_train_batches = np.array([[training_seq[i : batch_size + i]]
                               for i in range(0, len(training_seq) - batch_size - 1, batch_size)])
 
-  y_train_batches = np.array([[list(map(lambda value: value[1:4], training_seq[i +1 : batch_size + i + 1]))]  # just HLC bars as a prediction pls
+  y_train_batches = np.array([[list(map(lambda value: value[1:4], training_seq[i +1 : batch_size + i + 1]))]  # just HL bars as a prediction pls (no close, just to see if it helps)
                               for i in range(0, len(training_seq) - batch_size, batch_size)])
 
 
@@ -102,6 +102,9 @@ def parse_cmdline(ars):
 
 def get_total_data_batches_count_in_train_folder():
   return len(get_files_in_folder(data_folder))
+
+def get_train_data_batch_from_folder(index, batch_size):
+  return get_data_batch_from_folder(index, batch_size, data_folder)
 
 def get_random_data_batch_from_folder(batch_size):
   files        = get_files_in_folder(data_folder)
