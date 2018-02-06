@@ -43,13 +43,13 @@ class DesktopCPUConfig(object):
 
 class DesktopCPUConfig2(object):
   name           = "DesktopCPU2"
-  rnn_neurons    = 300
+  rnn_neurons    = 500
   batch_size     = 10
-  rnn_layers     = 2
+  rnn_layers     = 3
   n_inputs       = 6
   n_outputs      = 3
-  initial_lr     = 0.0005   #initial learning rate
-  decay_lr       = 0.9
+  initial_lr     = 0.001   #initial learning rate
+  decay_lr       = 0.89
   keep_prob      = 0.5     # dropout only on RNN layer(s)
 
   def create_rnn(self):
@@ -60,7 +60,7 @@ class GraphWrapper():
   def __init__(self, graph, init_op, initial_state_placeholder, multi_layer_cell,
                final_state_op, train_day, X, y, epoch, loss, outputs, learning_rate,
                training_op, keep_prob, summary_op, rnn_outputs, final_state, stacked_rnn_outputs,
-               stacked_outputs, is_training):
+               stacked_outputs, is_training, saver):
      self.graph                     = graph
      self.init_op                   = init_op
      self.initial_state_placeholder = initial_state_placeholder
@@ -81,6 +81,7 @@ class GraphWrapper():
      self.stacked_rnn_outputs       = stacked_rnn_outputs
      self.stacked_outputs           = stacked_outputs
      self.is_training_placeholder   = is_training
+     self.saver                     = saver
 
 
 def build_rnn_time_series_graph(graph_config):
@@ -113,10 +114,13 @@ def build_rnn_time_series_graph(graph_config):
 
 
     stacked_rnn_outputs = tf.reshape(rnn_outputs, [-1, graph_config.rnn_neurons], name="stacked_rnn_outputs")
+
+    output_normalization_0     = tf.layers.batch_normalization(stacked_rnn_outputs, training=is_training, momentum=0.99)
+    output_normalization_0_act = tf.nn.elu(output_normalization_0)
   #  hidden_outputs_0    = tf.layers.dense(stacked_rnn_outputs, graph_config.rnn_neurons)
    # hidden_outputs_1    = tf.layers.dense(hidden_outputs_0, graph_config.rnn_neurons // 2)
    # hidden_outputs_2    = tf.layers.dense(hidden_outputs_1, graph_config.rnn_neurons // 4)   # unsquash for output values
-    stacked_outputs     = tf.layers.dense(stacked_rnn_outputs, graph_config.n_outputs, name="stacked_outputs")
+    stacked_outputs     = tf.layers.dense(output_normalization_0_act, graph_config.n_outputs, name="stacked_outputs")
     outputs             = tf.reshape(stacked_outputs,
                                      [-1, graph_config.batch_size, graph_config.n_outputs],
                                      name="outputs")
@@ -144,10 +148,12 @@ def build_rnn_time_series_graph(graph_config):
 
     summary_op = tf.summary.merge_all()
 
+    saver = tf.train.Saver(max_to_keep=0)
+
   return GraphWrapper(graph, init, initial_state_placeholder, multi_layer_cell, final_state,
                       train_day, X, y, epoch, loss, outputs, learning_rate, training_op,
                       keep_prob, summary_op, rnn_outputs, final_state, stacked_rnn_outputs,
-                      stacked_outputs, is_training)
+                      stacked_outputs, is_training, saver)
 
 
 
@@ -259,14 +265,16 @@ def main(_):
 
   # @TODO: need to redo those CMD params logic when they grow in number. Just stick to the bruteforce IF power
   if is_training or is_continue:
-    graph_wrapper    = build_rnn_time_series_graph(training_config)
-    training_session = tf.Session(graph=graph_wrapper.graph)
-    init_op          = graph_wrapper.init_op
+
     epochs           = 500
+    graph_wrapper    = build_rnn_time_series_graph(training_config)
+    init_op          = graph_wrapper.init_op
+    saver            = graph_wrapper.saver
+    training_session = tf.Session(graph=graph_wrapper.graph)
+
 
     with training_session as sess:
 
-      saver = tf.train.Saver(max_to_keep=0)
       data_batches_count = time_series_data.get_total_data_batches_count_in_train_folder()
 
       # it doesn't mean that much anymore, but is a good heuristic to skip to another epoch after
