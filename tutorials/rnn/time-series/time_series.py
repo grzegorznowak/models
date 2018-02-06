@@ -44,20 +44,23 @@ class DesktopCPUConfig(object):
 class DesktopCPUConfig2(object):
   name           = "DesktopCPU2"
   rnn_neurons    = 300
-  batch_size     = 16
-  rnn_layers     = 3
+  batch_size     = 10
+  rnn_layers     = 2
   n_inputs       = 6
   n_outputs      = 3
   initial_lr     = 0.0005   #initial learning rate
   decay_lr       = 0.9
-  keep_prob      = 1     # dropout only on RNN layer(s)
+  keep_prob      = 0.5     # dropout only on RNN layer(s)
 
   def create_rnn(self):
-    return tf.contrib.rnn.GRUBlockCellV2(num_units=self.rnn_neurons) # try using faster cells
+    return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) # try using faster cells
 
 
 class GraphWrapper():
-  def __init__(self, graph, init_op, initial_state_placeholder, multi_layer_cell, final_state_op, train_day, X, y, epoch, loss, outputs, learning_rate, training_op, keep_prob, summary_op):
+  def __init__(self, graph, init_op, initial_state_placeholder, multi_layer_cell,
+               final_state_op, train_day, X, y, epoch, loss, outputs, learning_rate,
+               training_op, keep_prob, summary_op, rnn_outputs, final_state, stacked_rnn_outputs,
+               stacked_outputs, is_training):
      self.graph                     = graph
      self.init_op                   = init_op
      self.initial_state_placeholder = initial_state_placeholder
@@ -73,6 +76,11 @@ class GraphWrapper():
      self.training_op_placeholder   = training_op
      self.keep_prob_placeholder     = keep_prob
      self.summary_op                = summary_op
+     self.rnn_outputs               = rnn_outputs
+     self.final_state               = final_state
+     self.stacked_rnn_outputs       = stacked_rnn_outputs
+     self.stacked_outputs           = stacked_outputs
+     self.is_training_placeholder   = is_training
 
 
 def build_rnn_time_series_graph(graph_config):
@@ -89,17 +97,26 @@ def build_rnn_time_series_graph(graph_config):
     learning_rate  = tf.placeholder(tf.float32, None, name="learning_rate")
     epoch          = tf.placeholder(tf.int16  , name="epoch")
     train_day      = tf.placeholder(tf.int16  , name="train_day")
+    is_training    = tf.placeholder_with_default(True  , shape=(), name="is_training")
+    initial_state_placeholder  = tf.placeholder(tf.float32, name="initial_state_placeholder")
 
     cell_layers    = [graph_config.create_rnn() for _ in range(graph_config.rnn_layers)]
     dropout_layers = list(map(create_dropout, cell_layers))
 
-    multi_layer_cell          = tf.contrib.rnn.MultiRNNCell(dropout_layers, state_is_tuple=False)
-    initial_state_placeholder = tf.placeholder(tf.float32, name="initial_state_placeholder")
+    hidden_input_0             = tf.layers.dense(X, graph_config.rnn_neurons)  # squash inputs for further processing
+    hidden_normalization_0     = tf.layers.batch_normalization(hidden_input_0, training=is_training, momentum=0.99)
+    hidden_normalization_0_act = tf.nn.elu(hidden_normalization_0)
+    multi_layer_cell           = tf.contrib.rnn.MultiRNNCell(dropout_layers, state_is_tuple=False)
 
-    rnn_outputs, final_state   = tf.nn.dynamic_rnn(multi_layer_cell, X, dtype=tf.float32, initial_state=initial_state_placeholder)
+
+    rnn_outputs, final_state   = tf.nn.dynamic_rnn(multi_layer_cell, hidden_normalization_0_act, dtype=tf.float32, initial_state=initial_state_placeholder)
+
 
     stacked_rnn_outputs = tf.reshape(rnn_outputs, [-1, graph_config.rnn_neurons], name="stacked_rnn_outputs")
-    stacked_outputs     = tf.layers.dense(stacked_rnn_outputs, graph_config.n_outputs, name="stacked_outputs", kernel_initializer=he_init)
+  #  hidden_outputs_0    = tf.layers.dense(stacked_rnn_outputs, graph_config.rnn_neurons)
+   # hidden_outputs_1    = tf.layers.dense(hidden_outputs_0, graph_config.rnn_neurons // 2)
+   # hidden_outputs_2    = tf.layers.dense(hidden_outputs_1, graph_config.rnn_neurons // 4)   # unsquash for output values
+    stacked_outputs     = tf.layers.dense(stacked_rnn_outputs, graph_config.n_outputs, name="stacked_outputs")
     outputs             = tf.reshape(stacked_outputs,
                                      [-1, graph_config.batch_size, graph_config.n_outputs],
                                      name="outputs")
@@ -127,7 +144,10 @@ def build_rnn_time_series_graph(graph_config):
 
     summary_op = tf.summary.merge_all()
 
-  return GraphWrapper(graph, init, initial_state_placeholder, multi_layer_cell, final_state, train_day, X, y, epoch, loss, outputs, learning_rate, training_op, keep_prob, summary_op)
+  return GraphWrapper(graph, init, initial_state_placeholder, multi_layer_cell, final_state,
+                      train_day, X, y, epoch, loss, outputs, learning_rate, training_op,
+                      keep_prob, summary_op, rnn_outputs, final_state, stacked_rnn_outputs,
+                      stacked_outputs, is_training)
 
 
 
@@ -142,6 +162,7 @@ def measure_performance(zero_state, X, y, graph_wrapper, sess, verification_day_
   keep_prob     = graph_wrapper.keep_prob_placeholder
   new_state_op  = graph_wrapper.final_state_op
   initial_state_placeholder = graph_wrapper.initial_state_placeholder
+  is_training_placeholder = graph_wrapper.is_training_placeholder
 
   next_state = zero_state
   sum_mse    = 0
@@ -150,7 +171,8 @@ def measure_performance(zero_state, X, y, graph_wrapper, sess, verification_day_
                                                feed_dict={X_placeholder: X[batch_number],
                                                           y_placeholder: y[batch_number],
                                                           keep_prob: 1,
-                                                          initial_state_placeholder: next_state})
+                                                          initial_state_placeholder: next_state,
+                                                          is_training_placeholder:False})
     sum_mse += mse
 
     if batch_number % 10 == 0: # print out details only every 10
@@ -175,13 +197,33 @@ def training_iteration(previous_state, current_learning_rate, iteration, epoch, 
   training_op   = graph_wrapper.training_op_placeholder
   outputs       = graph_wrapper.outputs_placeholder
   loss          = graph_wrapper.loss_placeholder
+  # rnn_outputs_op = graph_wrapper.rnn_outputs
+  # final_state_op = graph_wrapper.final_state
+  # stacked_rnn_outputs_op = graph_wrapper.stacked_rnn_outputs
+  # stacked_outputs_op = graph_wrapper.stacked_outputs
 
   train, new_state = session.run([training_op, new_state_op],
                                       feed_dict={X: train_X, y: train_y, keep_prob: training_config.keep_prob,
                                                  learning_rate: current_learning_rate,
                                                  initial_state_placeholder: previous_state})
 
-  if iteration % 100 == 0:
+  if iteration % 1000 == 0:
+    # print("RNN OUTPUTS")
+    # print(rnn_outputs)
+    # print("END")
+    #
+    # print("FINAL STATE")
+    # print(final_state)
+    # print("END")
+    #
+    # print("STACKED RNN")
+    # print(stacked_rnn_outputs)
+    # print("END")
+    #
+    # print("STACKED OUT")
+    # print(stacked_outputs)
+    # print("END")
+
     summary = session.run(graph_wrapper.summary_op,
                           feed_dict={
                              X: train_X, y: train_y, keep_prob: 1,
@@ -200,7 +242,7 @@ def training_iteration(previous_state, current_learning_rate, iteration, epoch, 
     print("last train_y vs output: \n"  , train_y[-1][-1], "\t -> \t", train_response[-1][-1], "\tMSE:"  , mse)
     print("current LR: ", current_learning_rate)
 
-  if iteration % 100000 == 0:  # save network rarily
+  if iteration % 150000 == 0:  # save network rarily
     saver.save(session, save_dir + "model_" + str(iteration) + "_" + str(epoch) + ".ckpt")
 
   return new_state
@@ -268,7 +310,7 @@ def main(_):
             previous_state_value = training_iteration(previous_state_value, current_learning_rate, epoch_iteration, epoch, data_batch, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], graph_wrapper, sess, saver, save_dir, file_writer, training_config)
             epoch_iteration += training_config.batch_size
 
-          if data_batch % 4 == 0:
+          if data_batch % 5 == 0:
             # print out verfication stats every a few days worth of training
             measure_performance(zero_state(), verification_X, verification_y, graph_wrapper, sess, verification_day_index)
 
