@@ -61,7 +61,7 @@ def get_data_from_file(filename, batch_size):
   X_train_batches = np.array([[training_seq[i : batch_size + i]]
                               for i in range(0, len(training_seq) - batch_size - 1, batch_size)])
 
-  y_train_batches = np.array([[list(map(lambda value: value[1:4], training_seq[i +1 : batch_size + i + 1]))]  # just HL bars as a prediction pls (no close, just to see if it helps)
+  y_train_batches = np.array([[list(map(lambda value: [value[1]], training_seq[i +1 : batch_size + i + 1]))]  # just H bars as a prediction pls (no close, just to see if it helps)
                               for i in range(0, len(training_seq) - batch_size, batch_size)])
 
 

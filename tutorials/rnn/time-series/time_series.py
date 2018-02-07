@@ -43,13 +43,13 @@ class DesktopCPUConfig(object):
 
 class DesktopCPUConfig2(object):
   name           = "DesktopCPU2"
-  rnn_neurons    = 500
+  rnn_neurons    = 300
   batch_size     = 10
-  rnn_layers     = 3
+  rnn_layers     = 2
   n_inputs       = 6
-  n_outputs      = 3
+  n_outputs      = 1
   initial_lr     = 0.001   #initial learning rate
-  decay_lr       = 0.89
+  decay_lr       = 0.95
   keep_prob      = 0.5     # dropout only on RNN layer(s)
 
   def create_rnn(self):
@@ -99,32 +99,32 @@ def build_rnn_time_series_graph(graph_config):
     epoch          = tf.placeholder(tf.int16  , name="epoch")
     train_day      = tf.placeholder(tf.int16  , name="train_day")
     is_training    = tf.placeholder_with_default(True  , shape=(), name="is_training")
-    initial_state_placeholder  = tf.placeholder(tf.float32, name="initial_state_placeholder")
+    initial_state_placeholder  = tf.placeholder(tf.float32, [1, graph_config.rnn_neurons * graph_config.rnn_layers], name="initial_state_placeholder")
 
     cell_layers    = [graph_config.create_rnn() for _ in range(graph_config.rnn_layers)]
     dropout_layers = list(map(create_dropout, cell_layers))
 
     hidden_input_0             = tf.layers.dense(X, graph_config.rnn_neurons)  # squash inputs for further processing
-    hidden_normalization_0     = tf.layers.batch_normalization(hidden_input_0, training=is_training, momentum=0.99)
+    hidden_normalization_0     = tf.contrib.layers.layer_norm(hidden_input_0)
     hidden_normalization_0_act = tf.nn.elu(hidden_normalization_0)
     multi_layer_cell           = tf.contrib.rnn.MultiRNNCell(dropout_layers, state_is_tuple=False)
 
-
-    rnn_outputs, final_state   = tf.nn.dynamic_rnn(multi_layer_cell, hidden_normalization_0_act, dtype=tf.float32, initial_state=initial_state_placeholder)
+    input_state_preproces      = tf.layers.dense(initial_state_placeholder, graph_config.rnn_neurons * graph_config.rnn_layers, activation=tf.sigmoid)  # sigmoid to have it output proper values for RNN's state values
+    rnn_outputs, final_state   = tf.nn.dynamic_rnn(multi_layer_cell, hidden_normalization_0_act, dtype=tf.float32, initial_state=input_state_preproces)
 
 
     stacked_rnn_outputs = tf.reshape(rnn_outputs, [-1, graph_config.rnn_neurons], name="stacked_rnn_outputs")
 
-    output_normalization_0     = tf.layers.batch_normalization(stacked_rnn_outputs, training=is_training, momentum=0.99)
-    output_normalization_0_act = tf.nn.elu(output_normalization_0)
+ #   output_normalization_0     = tf.contrib.layers.layer_norm(stacked_rnn_outputs)
+ #   output_normalization_0_act = tf.nn.elu(output_normalization_0)
   #  hidden_outputs_0    = tf.layers.dense(stacked_rnn_outputs, graph_config.rnn_neurons)
    # hidden_outputs_1    = tf.layers.dense(hidden_outputs_0, graph_config.rnn_neurons // 2)
    # hidden_outputs_2    = tf.layers.dense(hidden_outputs_1, graph_config.rnn_neurons // 4)   # unsquash for output values
-    stacked_outputs     = tf.layers.dense(output_normalization_0_act, graph_config.n_outputs, name="stacked_outputs")
+    stacked_outputs     = tf.layers.dense(stacked_rnn_outputs, graph_config.n_outputs, name="stacked_outputs")
     outputs             = tf.reshape(stacked_outputs,
                                      [-1, graph_config.batch_size, graph_config.n_outputs],
                                      name="outputs")
-
+    outputs_int  = tf.cast(outputs, tf.int32)
     loss       = tf.losses.mean_squared_error(y , outputs)
     optimizer  = tf.train.AdamOptimizer(learning_rate=learning_rate)
     #optimizer  = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
@@ -151,7 +151,7 @@ def build_rnn_time_series_graph(graph_config):
     saver = tf.train.Saver(max_to_keep=0)
 
   return GraphWrapper(graph, init, initial_state_placeholder, multi_layer_cell, final_state,
-                      train_day, X, y, epoch, loss, outputs, learning_rate, training_op,
+                      train_day, X, y, epoch, loss, outputs_int, learning_rate, training_op,
                       keep_prob, summary_op, rnn_outputs, final_state, stacked_rnn_outputs,
                       stacked_outputs, is_training, saver)
 
@@ -184,7 +184,7 @@ def measure_performance(zero_state, X, y, graph_wrapper, sess, verification_day_
     if batch_number % 10 == 0: # print out details only every 10
       print("Verification batch number: ", batch_number,
           "\tvY vs vResp:\t",
-          y[batch_number][-1][-1], "\t<->", train_response[-1][-1],
+            np.transpose(y[batch_number][-1]), "\t<->",  np.transpose(train_response[-1]),
           "\tBatch MSE: ", mse)
 
 
@@ -203,6 +203,7 @@ def training_iteration(previous_state, current_learning_rate, iteration, epoch, 
   training_op   = graph_wrapper.training_op_placeholder
   outputs       = graph_wrapper.outputs_placeholder
   loss          = graph_wrapper.loss_placeholder
+  is_training_placeholder = graph_wrapper.is_training_placeholder
   # rnn_outputs_op = graph_wrapper.rnn_outputs
   # final_state_op = graph_wrapper.final_state
   # stacked_rnn_outputs_op = graph_wrapper.stacked_rnn_outputs
@@ -214,38 +215,26 @@ def training_iteration(previous_state, current_learning_rate, iteration, epoch, 
                                                  initial_state_placeholder: previous_state})
 
   if iteration % 1000 == 0:
-    # print("RNN OUTPUTS")
-    # print(rnn_outputs)
-    # print("END")
-    #
-    # print("FINAL STATE")
-    # print(final_state)
-    # print("END")
-    #
-    # print("STACKED RNN")
-    # print(stacked_rnn_outputs)
-    # print("END")
-    #
-    # print("STACKED OUT")
-    # print(stacked_outputs)
-    # print("END")
-
     summary = session.run(graph_wrapper.summary_op,
                           feed_dict={
                              X: train_X, y: train_y, keep_prob: 1,
                              initial_state_placeholder: previous_state, learning_rate: current_learning_rate,
                              epoch_holder: epoch,
-                             train_day_placeholder: random_index })
+                             train_day_placeholder: random_index,
+                             is_training_placeholder: False})
 
     file_writer.add_summary(summary, iteration)
 
   if iteration % 2000 == 0:
-    mse             = session.run(loss, feed_dict={X: train_X, y: train_y, keep_prob: 1, initial_state_placeholder: previous_state})
+    mse, train_response             = session.run([loss, outputs],
+                                                  feed_dict={X: train_X, y: train_y, keep_prob: 1,
+                                                             initial_state_placeholder: previous_state,
+                                                             is_training_placeholder: False})
    # verify_mse     = session.run(loss, feed_dict={X: verify_X, y: verify_y, keep_prob: 1, initial_state_placeholder: previous_state})
-    train_response  = session.run(outputs, feed_dict={X: train_X, keep_prob: 1, initial_state_placeholder: previous_state})
+    #train_response  = session.run(outputs, feed_dict={X: train_X, keep_prob: 1, initial_state_placeholder: previous_state})
 
     print("epoch: ", epoch, ", (ticks) iteration: ", iteration)
-    print("last train_y vs output: \n"  , train_y[-1][-1], "\t -> \t", train_response[-1][-1], "\tMSE:"  , mse)
+    print("last train_y vs output: \n"  , np.transpose(train_y[-1]), "\t -> \t", np.transpose(train_response[-1]), "\tMSE:"  , mse)
     print("current LR: ", current_learning_rate)
 
   if iteration % 150000 == 0:  # save network rarily
@@ -290,9 +279,10 @@ def main(_):
 
       print("data_batches_count in folder", data_batches_count)
 
-      @lru_cache(maxsize=2)
+    #  @lru_cache(maxsize=2)
       def zero_state():
-        return np.zeros((1,training_config.rnn_neurons * training_config.rnn_layers))
+        #return np.zeros((1,training_config.rnn_neurons * training_config.rnn_layers))
+        return np.random.rand(1,training_config.rnn_neurons * training_config.rnn_layers)
 
       start_day = int(start_day_input)
       if int(end_day_input):
