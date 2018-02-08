@@ -43,9 +43,9 @@ class DesktopCPUConfig(object):
 
 class DesktopCPUConfig2(object):
   name           = "DesktopCPU2"
-  rnn_neurons    = 300
+  rnn_neurons    = 500
   batch_size     = 10
-  rnn_layers     = 2
+  rnn_layers     = 3
   n_inputs       = 6
   n_outputs      = 1
   initial_lr     = 0.001   #initial learning rate
