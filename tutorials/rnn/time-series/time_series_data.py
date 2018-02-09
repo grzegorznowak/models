@@ -61,7 +61,7 @@ def get_data_from_file(filename, batch_size):
   X_train_batches = np.array([[training_seq[i : batch_size + i]]
                               for i in range(0, len(training_seq) - batch_size - 1, batch_size)])
 
-  y_train_batches = np.array([[list(map(lambda value: [value[1]], training_seq[i +1 : batch_size + i + 1]))]  # just H bars as a prediction pls (no close, just to see if it helps)
+  y_train_batches = np.array([[list(map(lambda value: [value[1]], training_seq[i + 1 : batch_size + i + 1]))]  # just H bars as a prediction pls (no close, just to see if it helps)
                               for i in range(0, len(training_seq) - batch_size, batch_size)])
 
 
@@ -103,8 +103,14 @@ def parse_cmdline(ars):
 def get_total_data_batches_count_in_train_folder():
   return len(get_files_in_folder(data_folder))
 
+def get_total_data_batches_count_in_verify_folder():
+  return len(get_files_in_folder(verification_data_folder))
+
 def get_train_data_batch_from_folder(index, batch_size):
   return get_data_batch_from_folder(index, batch_size, data_folder)
+
+def get_verify_data_batch_from_folder(index, batch_size):
+  return get_data_batch_from_folder(index, batch_size, verification_data_folder)
 
 def get_random_data_batch_from_folder(batch_size):
   files        = get_files_in_folder(data_folder)
@@ -115,15 +121,12 @@ def get_random_data_batch_from_folder(batch_size):
 def get_random_data_batch_from_verification_folder(batch_size):
   files        = get_files_in_folder(verification_data_folder)
   random_index = random.randint(0, len(files) -1)
-
   return get_data_batch_from_folder(random_index, batch_size, verification_data_folder), random_index
 
-@lru_cache(maxsize=20)
+@lru_cache(maxsize=2048)
 def get_data_batch_from_folder(index, batch_size, directory):
   files     = get_files_in_folder(directory)
   filename  = os.fsdecode(files[index])
-
-  print(filename)
 
   return get_data_from_file(os.path.join(directory, filename), batch_size)
 

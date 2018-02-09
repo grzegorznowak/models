@@ -1,5 +1,6 @@
 import gc
 import sys
+from tqdm import tqdm
 import numpy as np
 import tensorflow as tf
 import time_series_data
@@ -15,16 +16,17 @@ tr = tracker.SummaryTracker()
 
 class LaptopCPUConfig(object):
   name           = "LaptopCPU"
-  rnn_neurons    = 1000
+  rnn_neurons    = 300
   batch_size     = 1
-  rnn_layers     = 2
+  rnn_layers     = 1
   n_outputs      = 4
   n_inputs       = 4
   initial_lr     = 0.001   #initial learning rate
-  decay_lr       = 0.99
+  decay_lr       = 0.9
   keep_prob      = 0.5     # dropout only on RNN layer(s)
+  full_mse_count = 2
   def create_rnn(self):
-    return tf.contrib.rnn.RNNCell(num_units=self.rnn_neurons) # try using faster cells
+    return tf.contrib.rnn.BasicRNNCell(num_units=self.rnn_neurons) # try using faster cells
 
 
 class DesktopCPUConfig(object):
@@ -37,30 +39,32 @@ class DesktopCPUConfig(object):
   initial_lr     = 0.0005   #initial learning rate
   decay_lr       = 0.99
   keep_prob      = 0.99     # dropout only on RNN layer(s)
+  full_mse_count = 10
 
   def create_rnn(self):
     return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) #tf.nn.relu , use_peepholes=True
 
 class DesktopCPUConfig2(object):
   name           = "DesktopCPU2"
-  rnn_neurons    = 500
-  batch_size     = 10
+  rnn_neurons    = 400
+  batch_size     = 5
   rnn_layers     = 3
   n_inputs       = 6
   n_outputs      = 1
-  initial_lr     = 0.001   #initial learning rate
-  decay_lr       = 0.95
+  initial_lr     = 0.0005   #initial learning rate
+  decay_lr       = 0.8
   keep_prob      = 0.5     # dropout only on RNN layer(s)
+  full_mse_count = 3
 
   def create_rnn(self):
-    return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) # try using faster cells
+    return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons, activation=tf.nn.relu) # try using faster cells?
 
 
 class GraphWrapper():
   def __init__(self, graph, init_op, initial_state_placeholder, multi_layer_cell,
                final_state_op, train_day, X, y, epoch, loss, outputs, learning_rate,
                training_op, keep_prob, summary_op, rnn_outputs, final_state, stacked_rnn_outputs,
-               stacked_outputs, is_training, saver):
+               stacked_outputs, is_training, saver, totals_summary_op, total_train_mse, total_verification_mse):
      self.graph                     = graph
      self.init_op                   = init_op
      self.initial_state_placeholder = initial_state_placeholder
@@ -82,6 +86,9 @@ class GraphWrapper():
      self.stacked_outputs           = stacked_outputs
      self.is_training_placeholder   = is_training
      self.saver                     = saver
+     self.totals_summary_op         = totals_summary_op
+     self.total_train_mse           = total_train_mse
+     self.total_verification_mse    = total_verification_mse
 
 
 def build_rnn_time_series_graph(graph_config):
@@ -99,6 +106,10 @@ def build_rnn_time_series_graph(graph_config):
     epoch          = tf.placeholder(tf.int16  , name="epoch")
     train_day      = tf.placeholder(tf.int16  , name="train_day")
     is_training    = tf.placeholder_with_default(True  , shape=(), name="is_training")
+
+    total_train_mse        = tf.placeholder(tf.float32)
+    total_verification_mse = tf.placeholder(tf.float32)
+
     initial_state_placeholder  = tf.placeholder(tf.float32, [1, graph_config.rnn_neurons * graph_config.rnn_layers], name="initial_state_placeholder")
 
     cell_layers    = [graph_config.create_rnn() for _ in range(graph_config.rnn_layers)]
@@ -109,8 +120,8 @@ def build_rnn_time_series_graph(graph_config):
     hidden_normalization_0_act = tf.nn.elu(hidden_normalization_0)
     multi_layer_cell           = tf.contrib.rnn.MultiRNNCell(dropout_layers, state_is_tuple=False)
 
-    input_state_preproces      = tf.layers.dense(initial_state_placeholder, graph_config.rnn_neurons * graph_config.rnn_layers, activation=tf.sigmoid)  # sigmoid to have it output proper values for RNN's state values
-    rnn_outputs, final_state   = tf.nn.dynamic_rnn(multi_layer_cell, hidden_normalization_0_act, dtype=tf.float32, initial_state=input_state_preproces)
+#    input_state_preproces      = tf.layers.dense(initial_state_placeholder, graph_config.rnn_neurons * graph_config.rnn_layers, activation=tf.sigmoid)  # sigmoid to have it output proper values for RNN's state values
+    rnn_outputs, final_state   = tf.nn.dynamic_rnn(multi_layer_cell, hidden_normalization_0_act, dtype=tf.float32, initial_state=initial_state_placeholder)
 
 
     stacked_rnn_outputs = tf.reshape(rnn_outputs, [-1, graph_config.rnn_neurons], name="stacked_rnn_outputs")
@@ -136,24 +147,32 @@ def build_rnn_time_series_graph(graph_config):
     training_op    = optimizer.minimize(loss, name="training_op")
 
 
-    tf.summary.scalar("learning_rate", learning_rate)
-    tf.summary.scalar("epoch"        , epoch)
-    tf.summary.histogram("train_day"    , train_day)
-    tf.summary.scalar("mse_summary"  , loss)
+    # mergable summaries
+    learning_rate_summary = tf.summary.scalar("learning_rate", learning_rate)
+    epoch_summary         = tf.summary.scalar("epoch"        , epoch)
+    train_day_summary     = tf.summary.histogram("train_day"    , train_day)
+    mse_summary_summary   = tf.summary.scalar("mse_summary"  , loss)
 
-    tf.summary.histogram("weights_output", outputs)
-    tf.summary.histogram("new_states", final_state)
+    weights_output_summary = tf.summary.histogram("weights_output", outputs)
+    new_states_summary     = tf.summary.histogram("new_states", final_state)
 
     init = tf.global_variables_initializer()
 
-    summary_op = tf.summary.merge_all()
+    summary_op = tf.summary.merge([learning_rate_summary, epoch_summary, train_day_summary, mse_summary_summary,
+                                   weights_output_summary, new_states_summary])
+
+    # specific summaries
+    total_train_mse_summary        = tf.summary.scalar("total_train_mse"  , total_train_mse)
+    total_verification_mse_summary = tf.summary.scalar("total_verification_mse"  , total_verification_mse)
+
+    totals_summary_op = tf.summary.merge([total_train_mse_summary, total_verification_mse_summary])
 
     saver = tf.train.Saver(max_to_keep=0)
 
   return GraphWrapper(graph, init, initial_state_placeholder, multi_layer_cell, final_state,
                       train_day, X, y, epoch, loss, outputs_int, learning_rate, training_op,
                       keep_prob, summary_op, rnn_outputs, final_state, stacked_rnn_outputs,
-                      stacked_outputs, is_training, saver)
+                      stacked_outputs, is_training, saver, totals_summary_op, total_train_mse, total_verification_mse)
 
 
 
@@ -181,10 +200,10 @@ def measure_performance(zero_state, X, y, graph_wrapper, sess, verification_day_
                                                           is_training_placeholder:False})
     sum_mse += mse
 
-    if batch_number % 10 == 0: # print out details only every 10
+    if batch_number % 20 == 0: # print out details only every 10
       print("Verification batch number: ", batch_number,
-          "\tvY vs vResp:\t",
-            np.transpose(y[batch_number][-1]), "\t<->",  np.transpose(train_response[-1]),
+          "\tvY vs vResp:",
+            np.transpose(y[batch_number][-1]), "<->",  np.transpose(train_response[-1]),
           "\tBatch MSE: ", mse)
 
 
@@ -204,18 +223,14 @@ def training_iteration(previous_state, current_learning_rate, iteration, epoch, 
   outputs       = graph_wrapper.outputs_placeholder
   loss          = graph_wrapper.loss_placeholder
   is_training_placeholder = graph_wrapper.is_training_placeholder
-  # rnn_outputs_op = graph_wrapper.rnn_outputs
-  # final_state_op = graph_wrapper.final_state
-  # stacked_rnn_outputs_op = graph_wrapper.stacked_rnn_outputs
-  # stacked_outputs_op = graph_wrapper.stacked_outputs
 
   train, new_state = session.run([training_op, new_state_op],
                                       feed_dict={X: train_X, y: train_y, keep_prob: training_config.keep_prob,
                                                  learning_rate: current_learning_rate,
                                                  initial_state_placeholder: previous_state})
 
-  if iteration % 1000 == 0:
-    summary = session.run(graph_wrapper.summary_op,
+  if iteration % 2000 == 0:
+    summary  = session.run(graph_wrapper.summary_op,
                           feed_dict={
                              X: train_X, y: train_y, keep_prob: 1,
                              initial_state_placeholder: previous_state, learning_rate: current_learning_rate,
@@ -225,22 +240,47 @@ def training_iteration(previous_state, current_learning_rate, iteration, epoch, 
 
     file_writer.add_summary(summary, iteration)
 
-  if iteration % 2000 == 0:
-    mse, train_response             = session.run([loss, outputs],
-                                                  feed_dict={X: train_X, y: train_y, keep_prob: 1,
-                                                             initial_state_placeholder: previous_state,
-                                                             is_training_placeholder: False})
-   # verify_mse     = session.run(loss, feed_dict={X: verify_X, y: verify_y, keep_prob: 1, initial_state_placeholder: previous_state})
-    #train_response  = session.run(outputs, feed_dict={X: train_X, keep_prob: 1, initial_state_placeholder: previous_state})
+  if iteration % 5000 == 0:
+    train_response, mse = session.run([outputs, loss],
+                                 feed_dict={X: train_X, y: train_y, keep_prob: 1,
+                                            initial_state_placeholder: previous_state,
+                                            is_training_placeholder: False})
 
     print("epoch: ", epoch, ", (ticks) iteration: ", iteration)
-    print("last train_y vs output: \n"  , np.transpose(train_y[-1]), "\t -> \t", np.transpose(train_response[-1]), "\tMSE:"  , mse)
+    print("last train_y vs output: \n"  , np.transpose(train_y[-1])[-1], "\t -> \t", np.transpose(train_response[-1])[-1], "\tMSE:"  , mse)
     print("current LR: ", current_learning_rate)
 
   if iteration % 150000 == 0:  # save network rarily
     saver.save(session, save_dir + "model_" + str(iteration) + "_" + str(epoch) + ".ckpt")
 
   return new_state
+
+def get_total_mse_for_data_set(zero_state, training_config, graph_wrapper, sess, days_worth_of_data, data_getter):
+
+    total_mse     = 0.0
+    new_state_op  = graph_wrapper.final_state_op
+    X             = graph_wrapper.X_placeholder
+    y             = graph_wrapper.y_placeholder
+    loss          = graph_wrapper.loss_placeholder
+    keep_prob     = graph_wrapper.keep_prob_placeholder
+    initial_state_placeholder = graph_wrapper.initial_state_placeholder
+
+    for data_batch in tqdm(range(days_worth_of_data)):
+        X_val, y_val    = data_getter(data_batch, training_config.batch_size)
+        data_batch_size = len(X_val)
+
+        previous_state_value = zero_state()
+        total_day_mse = 0.0
+
+        for data_iteration in range(data_batch_size):
+            previous_state_value, mse = sess.run([new_state_op, loss],
+                                                feed_dict={X: X_val[data_iteration], y: y_val[data_iteration],
+                                                           keep_prob: 1,
+                                                           initial_state_placeholder: previous_state_value})
+            total_day_mse += mse
+        total_mse += total_day_mse / data_batch_size
+
+    return total_mse / days_worth_of_data
 
 def main(_):
 
@@ -264,11 +304,16 @@ def main(_):
 
     with training_session as sess:
 
-      data_batches_count = time_series_data.get_total_data_batches_count_in_train_folder()
+      train_data_batches_count  = time_series_data.get_total_data_batches_count_in_train_folder()
+      verify_data_batches_count = time_series_data.get_total_data_batches_count_in_verify_folder()
 
       # it doesn't mean that much anymore, but is a good heuristic to skip to another epoch after
-      # data_batches_count worth of samples has passed by
-      end_day            = data_batches_count
+      # train_data_batches_count worth of samples has passed by
+      end_day            = train_data_batches_count
+      totals_summary_op  = graph_wrapper.totals_summary_op
+
+      total_train_mse_op       = graph_wrapper.total_train_mse
+      total_verification_mse_op = graph_wrapper.total_verification_mse
 
       if is_continue:
         print(restore_name)
@@ -277,7 +322,7 @@ def main(_):
       else:
         init_op.run()
 
-      print("data_batches_count in folder", data_batches_count)
+      print("train_data_batches_count in folder", train_data_batches_count)
 
     #  @lru_cache(maxsize=2)
       def zero_state():
@@ -287,30 +332,48 @@ def main(_):
       start_day = int(start_day_input)
       if int(end_day_input):
         end_day =  int(end_day_input)
+
+      days_worth_of_data        = end_day - start_day
+      days_between_mse_snapshot = days_worth_of_data // training_config.full_mse_count  # make full train/ver sets MSE snapshot every that many days
       for epoch in range(epochs):
         log_dir     = "{}/run-{}-{}-{}/".format('/tmp/time_series_logdir', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
         save_dir    = "{}/run-{}-{}-{}/".format('/tmp/time_series', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
-        file_writer = tf.summary.FileWriter(log_dir, tf.get_default_graph())
-        epoch_iteration = 0
+        file_writer = tf.summary.FileWriter(log_dir, tf.get_default_graph())  # TODO: each epoch will create a redundant node in graph, make it more TF way
+
+        epoch_iteration       = 0
         current_learning_rate = training_config.initial_lr * (training_config.decay_lr**epoch)
+
         (verification_X, verification_y), verification_day_index = time_series_data.get_random_data_batch_from_verification_folder(training_config.batch_size)
 
-        for data_batch in range(start_day, end_day):
+        print("days_between_mse_snapshot: ", days_between_mse_snapshot)
+
+        for data_batch in range(days_worth_of_data):
           train_X, train_y = time_series_data.get_train_data_batch_from_folder(data_batch, training_config.batch_size)
-          data_batch_size      = len(train_X) - 1
+          data_batch_size  = len(train_X)
+
           previous_state_value = zero_state()
 
           print("Training ", epoch, "epoch, \tlearning rate:", current_learning_rate,"\ttrain set len of: ", data_batch_size,
-                " iterations, \ncurrent data batch: ",data_batch, ' / ', data_batches_count, ' simulating day no. ', data_batch)
+                " iterations, \ncurrent data batch: ",data_batch, ' / ', train_data_batches_count, ' simulating day no. ', data_batch)
 
 
           for data_iteration in range(data_batch_size):
             previous_state_value = training_iteration(previous_state_value, current_learning_rate, epoch_iteration, epoch, data_batch, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], graph_wrapper, sess, saver, save_dir, file_writer, training_config)
-            epoch_iteration += training_config.batch_size
+            epoch_iteration     += training_config.batch_size
 
-          if data_batch % 5 == 0:
-            # print out verfication stats every a few days worth of training
+          if data_batch % 10 == 0:
+            # print out verification stats every a few days worth of training
             measure_performance(zero_state(), verification_X, verification_y, graph_wrapper, sess, verification_day_index)
+
+          if (data_batch+1) % days_between_mse_snapshot == 0:
+               total_verify_mse = get_total_mse_for_data_set(zero_state, training_config, graph_wrapper, sess, verify_data_batches_count, time_series_data.get_verify_data_batch_from_folder)
+               total_train_mse  = get_total_mse_for_data_set(zero_state, training_config, graph_wrapper, sess, train_data_batches_count , time_series_data.get_train_data_batch_from_folder)
+               summary          = sess.run(totals_summary_op,
+                                           feed_dict={total_train_mse_op: total_train_mse,
+                                                      total_verification_mse_op: total_verify_mse})
+
+               file_writer.add_summary(summary, data_batch)
+
 
         file_writer.close()
         saver.save(sess, save_dir + "model_final_" + str(epoch) + ".ckpt")
