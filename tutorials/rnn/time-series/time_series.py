@@ -46,18 +46,18 @@ class DesktopCPUConfig(object):
 
 class DesktopCPUConfig2(object):
   name           = "DesktopCPU2"
-  rnn_neurons    = 400
+  rnn_neurons    = 500
   batch_size     = 5
-  rnn_layers     = 3
+  rnn_layers     = 1
   n_inputs       = 6
   n_outputs      = 1
-  initial_lr     = 0.0005   #initial learning rate
-  decay_lr       = 0.8
+  initial_lr     = 0.001   #initial learning rate
+  decay_lr       = 0.9
   keep_prob      = 0.5     # dropout only on RNN layer(s)
-  full_mse_count = 3
+  full_mse_count = 2
 
   def create_rnn(self):
-    return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons, activation=tf.nn.relu) # try using faster cells?
+    return tf.contrib.rnn.BasicRNNCell(num_units=self.rnn_neurons) # try using faster cells?
 
 
 class GraphWrapper():
@@ -367,7 +367,8 @@ def main(_):
 
           if (data_batch+1) % days_between_mse_snapshot == 0:
                total_verify_mse = get_total_mse_for_data_set(zero_state, training_config, graph_wrapper, sess, verify_data_batches_count, time_series_data.get_verify_data_batch_from_folder)
-               total_train_mse  = get_total_mse_for_data_set(zero_state, training_config, graph_wrapper, sess, train_data_batches_count , time_series_data.get_train_data_batch_from_folder)
+               # only 5% of train data please, just so we have some data but not clog the learning process
+               total_train_mse  = get_total_mse_for_data_set(zero_state, training_config, graph_wrapper, sess, train_data_batches_count // 20 , time_series_data.get_train_data_batch_from_folder)
                summary          = sess.run(totals_summary_op,
                                            feed_dict={total_train_mse_op: total_train_mse,
                                                       total_verification_mse_op: total_verify_mse})
