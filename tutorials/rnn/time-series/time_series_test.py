@@ -22,7 +22,7 @@ from __future__ import print_function
 import os.path
 
 import tensorflow as tf
-from time_series_data import get_random_data_batch_from_folder
+import time_series_data as tsd
 
 
 class TimesSeriesReaderTest(tf.test.TestCase):
@@ -36,12 +36,27 @@ class TimesSeriesReaderTest(tf.test.TestCase):
 
 
 
+  def testStatsCounting(self):
+      res = tsd.signal_stats([[[ 18, -24,   5,   2,  14.],
+                         [ 11, -20,   7,  11, -12.]]],
+                       [[[ 18, -24,   5,   2,  14.],
+                         [ 11, -20,   7,  11, 12.]]],
+                       10
+                       )
+
+      print(res)
 
   def testCsvReading(self):
 
-    gg = [1,2,3,4,5]
+    size = 5
+    Xs, ys = tsd.get_train_data_batches(0, 5, 1)
 
-    print(gg[1:3])
+ #   print(Xs[0])
+
+    Xs2, y2 = tsd.get_train_data_batch_from_folder(0,5)
+
+  #  print(Xs2[0])
+    #print(gg[1:3])
     # for _ in range(10):
     #   (X, y), random_index = get_random_data_batch_from_folder(4)
     #

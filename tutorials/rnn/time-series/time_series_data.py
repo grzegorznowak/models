@@ -2,6 +2,7 @@ import pandas as pd
 import os
 import random
 import numpy as np
+from numpy import genfromtxt
 from functools import lru_cache
 
 
@@ -68,6 +69,28 @@ def get_data_from_file(filename, batch_size):
   return X_train_batches, y_train_batches
 
 
+def get_steps_from_file(file, time_steps, directory):
+  filename = os.fsdecode(file)
+  filepath = os.path.join(directory, filename)
+
+  seq = genfromtxt(filepath, delimiter=',')
+
+  # split into items of input_size
+  X_train_steps = [[seq[i : time_steps + i]]
+                            for i in range(0, len(seq) - time_steps - 1, time_steps)]
+
+  y_train_steps = [[list(map(lambda value: [value[1]], seq[i + 1 : time_steps + i + 1]))]  # just H bars as a prediction pls (no close, just to see if it helps)
+                            for i in range(0, len(seq) - time_steps, time_steps)]
+
+  return X_train_steps, y_train_steps
+
+"""
+creates parallel batches from a couple of files.
+batch_size defines how many files to take into constructing data
+"""
+def get_data_batch_from_files(batch_size):
+  return []
+
 def parse_cmdline(ars):
   is_training     = (ars[1] == "train")
   is_continue     = (ars[1] == "continue")
@@ -100,15 +123,42 @@ def parse_cmdline(ars):
   return is_training, is_continue, restore_name, start_day_input, end_day_input
 
 
-def get_total_data_batches_count_in_train_folder():
-  return len(get_files_in_folder(data_folder))
+def get_total_data_batches_count_in_train_folder(batch_size):
+  return len(get_files_in_folder(data_folder)) // batch_size - 1  # last batch will be foobar, drop it
 
-def get_total_data_batches_count_in_verify_folder():
-  return len(get_files_in_folder(verification_data_folder))
+def get_total_data_batches_count_in_verify_folder(batch_size):
+  return len(get_files_in_folder(verification_data_folder)) // batch_size - 1
+
+@lru_cache(maxsize=2048)
+def get_data_batches_from_folder(folder, index, batch_size, steps_count):
+  files       = get_files_in_folder(folder)
+  batch_files = files[index * batch_size : index * batch_size + batch_size]
+  X_batches = []
+  y_batches = []
+
+  for file in batch_files:
+    X_batch, y_batch = get_steps_from_file(file, steps_count, folder)
+    X_batches.append(X_batch)
+    y_batches.append(y_batch)
+
+
+  shortest_batch_len = np.amin([len(l) for l in X_batches])
+  trimmed_Xs = [original[0:shortest_batch_len] for original in X_batches]
+  trimmed_ys = [original[0:shortest_batch_len] for original in y_batches]
+
+  return np.concatenate( trimmed_Xs, axis=1 ), np.concatenate( trimmed_ys, axis=1 )
+
+def get_verification_data_bathes(index, batch_size, steps_count):
+  return get_data_batches_from_folder(verification_data_folder, index, batch_size, steps_count)
+
+
+def get_train_data_batches(index, batch_size, steps_count):
+  return get_data_batches_from_folder(data_folder, index, batch_size, steps_count)
+
 
 def get_train_data_batch_from_folder(index, batch_size):
-
   return get_data_batch_from_folder(index, batch_size, data_folder)
+
 
 def get_verify_data_batch_from_folder(index, batch_size):
   return get_data_batch_from_folder(index, batch_size, verification_data_folder)
@@ -125,9 +175,9 @@ def get_random_data_batch_from_verification_folder(batch_size):
   return get_data_batch_from_folder(random_index, batch_size, verification_data_folder), random_index
 
 @lru_cache(maxsize=2048)
-def get_data_batch_from_folder(index, batch_size, directory):
+def get_data_batch_from_folder(batch_index, batch_size, directory):
   files     = get_files_in_folder(directory)
-  filename  = os.fsdecode(files[index])
+  filename  = os.fsdecode(files[batch_index])
 
   return get_data_from_file(os.path.join(directory, filename), batch_size)
 
@@ -144,34 +194,37 @@ def data_batches_count(row_count, batch_size):
   return max(1, row_count // (1000000 // batch_size)), 1000000 // batch_size
 
 
-def signal_stats(response, y_val, threshold):
+def signal_stats(predictions, labels, threshold):
+  negative_threshold = -1 * threshold   # also count outliers with reversed sign
   total = 0
   found = 0
   wrong = 0
-  threshold_rev = (-1) * threshold  # also count outliers with reversed sign
 
-  plain_y        = np.transpose(y_val[-1])[-1]
-  plain_response = np.transpose(response[-1])[-1]
-  for index_in_array in np.argwhere(plain_y >= threshold):
-    total += 1
-    index = index_in_array[-1]
-    if plain_response[index] >= threshold:
-      found += 1
+  response = np.asarray(predictions)
+  y_val    = np.asarray(labels)
 
-  for index_in_array in np.argwhere(plain_response >= threshold):
-    index = index_in_array[-1]
-    if plain_y[index] < threshold:
-      wrong += 1
+  it = np.nditer(y_val, flags=['multi_index'])
+  while not it.finished:
+    itm = it[0]
+    if itm <= negative_threshold:
+      total += 1
+      if response[it.multi_index] <= negative_threshold:
+        found += 1
+    if itm >= threshold:
+      total += 1
+      if response[it.multi_index] >= threshold:
+        found += 1
+    it.iternext()
 
-  for index_in_array in np.argwhere(plain_y <= threshold_rev):
-    total += 1
-    index = index_in_array[-1]
-    if plain_response[index] <= threshold_rev:
-      found += 1
-
-  for index_in_array in np.argwhere(plain_response <= threshold_rev):
-    index = index_in_array[-1]
-    if plain_y[index] > threshold_rev:
-      wrong += 1
+  it = np.nditer(response, flags=['multi_index'])
+  while not it.finished:
+    itm = it[0]
+    if itm <= negative_threshold:
+      if y_val[it.multi_index] > negative_threshold:
+        wrong += 1
+    if itm >= threshold:
+      if y_val[it.multi_index] < negative_threshold:
+        wrong += 1
+    it.iternext()
 
   return total, found, wrong
