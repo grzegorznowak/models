@@ -3,7 +3,7 @@ import sys
 from tqdm import tqdm
 import numpy as np
 import tensorflow as tf
-import time_series_data
+import time_series_data as tsd
 
 from random   import randint
 from datetime import datetime
@@ -28,7 +28,6 @@ class LaptopCPUConfig(object):
   def create_rnn(self):
     return tf.contrib.rnn.BasicRNNCell(num_units=self.rnn_neurons) # try using faster cells
 
-
 class DesktopCPUConfig(object):
   name           = "DesktopCPU"
   rnn_neurons    = 500
@@ -44,27 +43,75 @@ class DesktopCPUConfig(object):
   def create_rnn(self):
     return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) #tf.nn.relu , use_peepholes=True
 
-class DesktopCPUConfig2(object):
-  name           = "DesktopCPU2"
-  rnn_neurons    = 500
-  batch_size     = 5
-  rnn_layers     = 1
-  n_inputs       = 6
-  n_outputs      = 1
-  initial_lr     = 0.001   #initial learning rate
-  decay_lr       = 0.9
-  keep_prob      = 0.5     # dropout only on RNN layer(s)
-  full_mse_count = 2
+class RNN_50_1_5(object):
+    name           = "RNN_50_1_5"
+    rnn_neurons    = 50
+    batch_size     = 5
+    rnn_layers     = 1
+    n_inputs       = 6
+    n_outputs      = 1
+    initial_lr     = 0.0005   #initial learning rate
+    decay_lr       = 0.95
+    keep_prob      = 0.5     # dropout only on RNN layer(s)
+    full_mse_count = 20
 
-  def create_rnn(self):
-    return tf.contrib.rnn.BasicRNNCell(num_units=self.rnn_neurons) # try using faster cells?
+    def create_rnn(self):
+        return tf.contrib.rnn.BasicRNNCell(num_units=self.rnn_neurons) # try using faster cells?
+
+class RNN_300_3_5(object):
+    name           = "RNN_300_2_5"
+    rnn_neurons    = 300
+    batch_size     = 5
+    rnn_layers     = 3
+    n_inputs       = 6
+    n_outputs      = 1
+    initial_lr     = 0.0005   #initial learning rate
+    decay_lr       = 0.95
+    keep_prob      = 0.5     # dropout only on RNN layer(s)
+    full_mse_count = 2
+
+    def create_rnn(self):
+        return tf.contrib.rnn.BasicRNNCell(num_units=self.rnn_neurons) # try using faster cells?
+
+
+class GRU_300_2_5(object):
+    name           = "GRU_300_2_5"
+    rnn_neurons    = 300
+    batch_size     = 5
+    rnn_layers     = 2
+    n_inputs       = 6
+    n_outputs      = 1
+    initial_lr     = 0.001   #initial learning rate
+    decay_lr       = 0.95
+    keep_prob      = 0.5     # dropout only on RNN layer(s)
+    full_mse_count = 2
+
+    def create_rnn(self):
+        return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) # try using faster cells?
+
+class GRU_300_2_1(object):
+    name           = "GRU_300_2_1"
+    rnn_neurons    = 300
+    batch_size     = 1
+    rnn_layers     = 2
+    n_inputs       = 6
+    n_outputs      = 1
+    initial_lr     = 0.001   #initial learning rate
+    decay_lr       = 0.97
+    keep_prob      = 0.5     # dropout only on RNN layer(s)
+    full_mse_count = 2
+
+    def create_rnn(self):
+        return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) # try using faster cells?
 
 
 class GraphWrapper():
   def __init__(self, graph, init_op, initial_state_placeholder, multi_layer_cell,
                final_state_op, train_day, X, y, epoch, loss, outputs, learning_rate,
                training_op, keep_prob, summary_op, rnn_outputs, final_state, stacked_rnn_outputs,
-               stacked_outputs, is_training, saver, totals_summary_op, total_train_mse, total_verification_mse):
+               stacked_outputs, is_training, saver, totals_summary_op, total_train_mse,
+               total_verification_mse, mild_signals_found, mild_signals_wrong,
+               strong_signals_found, strong_signals_wrong):
      self.graph                     = graph
      self.init_op                   = init_op
      self.initial_state_placeholder = initial_state_placeholder
@@ -89,6 +136,10 @@ class GraphWrapper():
      self.totals_summary_op         = totals_summary_op
      self.total_train_mse           = total_train_mse
      self.total_verification_mse    = total_verification_mse
+     self.mild_signals_found        = mild_signals_found
+     self.mild_signals_wrong        = mild_signals_wrong
+     self.strong_signals_found      = strong_signals_found
+     self.strong_signals_wrong      = strong_signals_wrong
 
 
 def build_rnn_time_series_graph(graph_config):
@@ -98,7 +149,7 @@ def build_rnn_time_series_graph(graph_config):
   graph = tf.Graph()
   with graph.as_default():
     keep_prob      = tf.placeholder(tf.float32, None, name="keep_prob")
-    he_init        = tf.contrib.layers.variance_scaling_initializer()
+ #   he_init        = tf.contrib.layers.variance_scaling_initializer()
 
     X              = tf.placeholder(tf.float32, [None, graph_config.batch_size, graph_config.n_inputs] , name="X")
     y              = tf.placeholder(tf.float32, [None, graph_config.batch_size, graph_config.n_outputs], name="y")
@@ -109,28 +160,28 @@ def build_rnn_time_series_graph(graph_config):
 
     total_train_mse        = tf.placeholder(tf.float32)
     total_verification_mse = tf.placeholder(tf.float32)
+    mild_signals_found     = tf.placeholder(tf.float32)
+    mild_signals_wrong     = tf.placeholder(tf.float32)
+    strong_signals_found   = tf.placeholder(tf.float32)
+    strong_signals_wrong   = tf.placeholder(tf.float32)
 
-    initial_state_placeholder  = tf.placeholder(tf.float32, [1, graph_config.rnn_neurons * graph_config.rnn_layers], name="initial_state_placeholder")
+    initial_state_placeholder = tf.placeholder(tf.float32, [1, graph_config.rnn_neurons * graph_config.rnn_layers], name="initial_state_placeholder")
 
     cell_layers    = [graph_config.create_rnn() for _ in range(graph_config.rnn_layers)]
     dropout_layers = list(map(create_dropout, cell_layers))
 
-    hidden_input_0             = tf.layers.dense(X, graph_config.rnn_neurons)  # squash inputs for further processing
-    hidden_normalization_0     = tf.contrib.layers.layer_norm(hidden_input_0)
+    hidden_input_0             = tf.layers.dense(X, graph_config.n_inputs, name="hidden_input_0")
+
+    hidden_normalization_0     = tf.contrib.layers.layer_norm(hidden_input_0, begin_norm_axis=2)  # normalize each batch separately
     hidden_normalization_0_act = tf.nn.elu(hidden_normalization_0)
+
     multi_layer_cell           = tf.contrib.rnn.MultiRNNCell(dropout_layers, state_is_tuple=False)
 
-#    input_state_preproces      = tf.layers.dense(initial_state_placeholder, graph_config.rnn_neurons * graph_config.rnn_layers, activation=tf.sigmoid)  # sigmoid to have it output proper values for RNN's state values
     rnn_outputs, final_state   = tf.nn.dynamic_rnn(multi_layer_cell, hidden_normalization_0_act, dtype=tf.float32, initial_state=initial_state_placeholder)
 
-
+    print(final_state)
     stacked_rnn_outputs = tf.reshape(rnn_outputs, [-1, graph_config.rnn_neurons], name="stacked_rnn_outputs")
 
- #   output_normalization_0     = tf.contrib.layers.layer_norm(stacked_rnn_outputs)
- #   output_normalization_0_act = tf.nn.elu(output_normalization_0)
-  #  hidden_outputs_0    = tf.layers.dense(stacked_rnn_outputs, graph_config.rnn_neurons)
-   # hidden_outputs_1    = tf.layers.dense(hidden_outputs_0, graph_config.rnn_neurons // 2)
-   # hidden_outputs_2    = tf.layers.dense(hidden_outputs_1, graph_config.rnn_neurons // 4)   # unsquash for output values
     stacked_outputs     = tf.layers.dense(stacked_rnn_outputs, graph_config.n_outputs, name="stacked_outputs")
     outputs             = tf.reshape(stacked_outputs,
                                      [-1, graph_config.batch_size, graph_config.n_outputs],
@@ -162,18 +213,25 @@ def build_rnn_time_series_graph(graph_config):
                                    weights_output_summary, new_states_summary])
 
     # specific summaries
-    total_train_mse_summary        = tf.summary.scalar("total_train_mse"  , total_train_mse)
-    total_verification_mse_summary = tf.summary.scalar("total_verification_mse"  , total_verification_mse)
+    total_train_mse_summary         = tf.summary.scalar("total_train_mse"  , total_train_mse)
+    total_verification_mse_summary  = tf.summary.scalar("total_verification_mse"  , total_verification_mse)
+    mild_signals_found_summary      = tf.summary.scalar("mild_signals_found_summary (correct / total) max == 1 the higher the number the more accurate the network is"  , mild_signals_found)
+    mild_signals_wrong_summary      = tf.summary.scalar("mild_signals_wrong_summary (false positives / correct) the lower the number the better"  , mild_signals_wrong)
+    strong_signals_found_summary    = tf.summary.scalar("strong_signals_found_summary (correct / total) max == 1 the higher the number the more accurate the network is"  , strong_signals_found)
+    strong_signals_wrong_summary    = tf.summary.scalar("strong_signals_wrong_summary (false positives / correct) the lower the number the better"  , strong_signals_wrong)
 
-    totals_summary_op = tf.summary.merge([total_train_mse_summary, total_verification_mse_summary])
+    totals_summary_op = tf.summary.merge([total_train_mse_summary, total_verification_mse_summary,
+                                          mild_signals_found_summary, mild_signals_wrong_summary,
+                                          strong_signals_found_summary, strong_signals_wrong_summary])
 
     saver = tf.train.Saver(max_to_keep=0)
 
   return GraphWrapper(graph, init, initial_state_placeholder, multi_layer_cell, final_state,
                       train_day, X, y, epoch, loss, outputs_int, learning_rate, training_op,
                       keep_prob, summary_op, rnn_outputs, final_state, stacked_rnn_outputs,
-                      stacked_outputs, is_training, saver, totals_summary_op, total_train_mse, total_verification_mse)
-
+                      stacked_outputs, is_training, saver, totals_summary_op,
+                      total_train_mse, total_verification_mse, mild_signals_found, mild_signals_wrong,
+                      strong_signals_found, strong_signals_wrong)
 
 
 def measure_performance(zero_state, X, y, graph_wrapper, sess, verification_day_index):
@@ -224,10 +282,12 @@ def training_iteration(previous_state, current_learning_rate, iteration, epoch, 
   loss          = graph_wrapper.loss_placeholder
   is_training_placeholder = graph_wrapper.is_training_placeholder
 
+
   train, new_state = session.run([training_op, new_state_op],
                                       feed_dict={X: train_X, y: train_y, keep_prob: training_config.keep_prob,
                                                  learning_rate: current_learning_rate,
                                                  initial_state_placeholder: previous_state})
+
 
   if iteration % 2000 == 0:
     summary  = session.run(graph_wrapper.summary_op,
@@ -247,23 +307,41 @@ def training_iteration(previous_state, current_learning_rate, iteration, epoch, 
                                             is_training_placeholder: False})
 
     print("epoch: ", epoch, ", (ticks) iteration: ", iteration)
-    print("last train_y vs output: \n"  , np.transpose(train_y[-1])[-1], "\t -> \t", np.transpose(train_response[-1])[-1], "\tMSE:"  , mse)
+    plain_y        = np.transpose(train_y[-1])[-1]
+    plain_response = np.transpose(train_response[-1])[-1]
+    print("last train_y vs output: \n"  , plain_y, "\t -> \t", plain_response, "\tMSE:"  , mse)
     print("current LR: ", current_learning_rate)
+
+
+
+    # print(np.argwhere(plain_response > -2))
+
 
   if iteration % 150000 == 0:  # save network rarily
     saver.save(session, save_dir + "model_" + str(iteration) + "_" + str(epoch) + ".ckpt")
 
   return new_state
 
-def get_total_mse_for_data_set(zero_state, training_config, graph_wrapper, sess, days_worth_of_data, data_getter):
+def get_stats_for_data_set(zero_state, training_config, graph_wrapper, sess, days_worth_of_data, data_getter):
 
     total_mse     = 0.0
+    mild_signals_found   = 0
+    strong_signals_found = 0
+    mild_signals_total   = 0
+    strong_signals_total = 0
+    mild_signals_wrong   = 0
+    strong_signals_wrong = 0
+
+    mild_threshold   = 10
+    strong_threshold = 25
+
     new_state_op  = graph_wrapper.final_state_op
     X             = graph_wrapper.X_placeholder
     y             = graph_wrapper.y_placeholder
     loss          = graph_wrapper.loss_placeholder
     keep_prob     = graph_wrapper.keep_prob_placeholder
-    initial_state_placeholder = graph_wrapper.initial_state_placeholder
+    outputs       = graph_wrapper.outputs_placeholder
+    initial_state_placeholder  = graph_wrapper.initial_state_placeholder
 
     for data_batch in tqdm(range(days_worth_of_data)):
         X_val, y_val    = data_getter(data_batch, training_config.batch_size)
@@ -273,24 +351,37 @@ def get_total_mse_for_data_set(zero_state, training_config, graph_wrapper, sess,
         total_day_mse = 0.0
 
         for data_iteration in range(data_batch_size):
-            previous_state_value, mse = sess.run([new_state_op, loss],
+            response, previous_state_value, mse = sess.run([outputs, new_state_op, loss],
                                                 feed_dict={X: X_val[data_iteration], y: y_val[data_iteration],
                                                            keep_prob: 1,
                                                            initial_state_placeholder: previous_state_value})
+
+
+            mild_signals_total_in_iteration, mild_signals_found_in_iteration, mild_signals_wrong_in_teration       = tsd.signal_stats(response, y_val[data_iteration], mild_threshold)
+            strong_signals_total_in_iteration, strong_signals_found_in_iteration, strong_signals_wrong_in_teration = tsd.signal_stats(response, y_val[data_iteration], strong_threshold)
+
+            mild_signals_total += mild_signals_total_in_iteration
+            mild_signals_found += mild_signals_found_in_iteration
+            mild_signals_wrong += mild_signals_wrong_in_teration
+
+            strong_signals_total += strong_signals_total_in_iteration
+            strong_signals_found += strong_signals_found_in_iteration
+            strong_signals_wrong += strong_signals_wrong_in_teration
+
             total_day_mse += mse
         total_mse += total_day_mse / data_batch_size
 
-    return total_mse / days_worth_of_data
+    return (total_mse / days_worth_of_data), (mild_signals_found / mild_signals_total), (mild_signals_wrong / mild_signals_found), (strong_signals_found / strong_signals_total), (strong_signals_wrong / strong_signals_found)
 
 def main(_):
 
-  is_training, is_continue, restore_name, start_day_input, end_day_input = time_series_data.parse_cmdline(sys.argv)
+  is_training, is_continue, restore_name, start_day_input, end_day_input = tsd.parse_cmdline(sys.argv)
 
   if(len(sys.argv) < 1):
     print("wrong usage")
     os.exit(1)
 
-  training_config  = DesktopCPUConfig2()
+  training_config  = GRU_300_2_1()
 
   # @TODO: need to redo those CMD params logic when they grow in number. Just stick to the bruteforce IF power
   if is_training or is_continue:
@@ -304,13 +395,17 @@ def main(_):
 
     with training_session as sess:
 
-      train_data_batches_count  = time_series_data.get_total_data_batches_count_in_train_folder()
-      verify_data_batches_count = time_series_data.get_total_data_batches_count_in_verify_folder()
+      train_data_batches_count  = tsd.get_total_data_batches_count_in_train_folder()
+      verify_data_batches_count = tsd.get_total_data_batches_count_in_verify_folder()
 
       # it doesn't mean that much anymore, but is a good heuristic to skip to another epoch after
       # train_data_batches_count worth of samples has passed by
       end_day            = train_data_batches_count
       totals_summary_op  = graph_wrapper.totals_summary_op
+      mild_signals_found   = graph_wrapper.mild_signals_found
+      mild_signals_wrong   = graph_wrapper.mild_signals_wrong
+      strong_signals_found = graph_wrapper.strong_signals_found
+      strong_signals_wrong = graph_wrapper.strong_signals_wrong
 
       total_train_mse_op       = graph_wrapper.total_train_mse
       total_verification_mse_op = graph_wrapper.total_verification_mse
@@ -335,7 +430,7 @@ def main(_):
 
       days_worth_of_data        = end_day - start_day
       days_between_mse_snapshot = days_worth_of_data // training_config.full_mse_count  # make full train/ver sets MSE snapshot every that many days
-      for epoch in range(epochs):
+      for epoch in range(0, epochs):
         log_dir     = "{}/run-{}-{}-{}/".format('/tmp/time_series_logdir', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
         save_dir    = "{}/run-{}-{}-{}/".format('/tmp/time_series', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
         file_writer = tf.summary.FileWriter(log_dir, tf.get_default_graph())  # TODO: each epoch will create a redundant node in graph, make it more TF way
@@ -343,12 +438,12 @@ def main(_):
         epoch_iteration       = 0
         current_learning_rate = training_config.initial_lr * (training_config.decay_lr**epoch)
 
-        (verification_X, verification_y), verification_day_index = time_series_data.get_random_data_batch_from_verification_folder(training_config.batch_size)
+        (verification_X, verification_y), verification_day_index = tsd.get_random_data_batch_from_verification_folder(training_config.batch_size)
 
         print("days_between_mse_snapshot: ", days_between_mse_snapshot)
 
         for data_batch in range(days_worth_of_data):
-          train_X, train_y = time_series_data.get_train_data_batch_from_folder(data_batch, training_config.batch_size)
+          train_X, train_y = tsd.get_train_data_batch_from_folder(data_batch, training_config.batch_size)
           data_batch_size  = len(train_X)
 
           previous_state_value = zero_state()
@@ -366,11 +461,15 @@ def main(_):
             measure_performance(zero_state(), verification_X, verification_y, graph_wrapper, sess, verification_day_index)
 
           if (data_batch+1) % days_between_mse_snapshot == 0:
-               total_verify_mse = get_total_mse_for_data_set(zero_state, training_config, graph_wrapper, sess, verify_data_batches_count, time_series_data.get_verify_data_batch_from_folder)
+               total_verify_mse, mild_right_ratio, mild_wrong_ratio, strong_right_ratio, strong_wrong_ratio = get_stats_for_data_set(zero_state, training_config, graph_wrapper, sess, verify_data_batches_count, tsd.get_verify_data_batch_from_folder)
                # only 5% of train data please, just so we have some data but not clog the learning process
-               total_train_mse  = get_total_mse_for_data_set(zero_state, training_config, graph_wrapper, sess, train_data_batches_count // 20 , time_series_data.get_train_data_batch_from_folder)
+               total_train_mse, _, _, _, _  = get_stats_for_data_set(zero_state, training_config, graph_wrapper, sess, train_data_batches_count // 20 , tsd.get_train_data_batch_from_folder)
                summary          = sess.run(totals_summary_op,
                                            feed_dict={total_train_mse_op: total_train_mse,
+                                                      mild_signals_found: mild_right_ratio,
+                                                      mild_signals_wrong: mild_wrong_ratio,
+                                                      strong_signals_found: strong_right_ratio,
+                                                      strong_signals_wrong: strong_wrong_ratio,
                                                       total_verification_mse_op: total_verify_mse})
 
                file_writer.add_summary(summary, data_batch)

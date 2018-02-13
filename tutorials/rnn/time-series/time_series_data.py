@@ -107,6 +107,7 @@ def get_total_data_batches_count_in_verify_folder():
   return len(get_files_in_folder(verification_data_folder))
 
 def get_train_data_batch_from_folder(index, batch_size):
+
   return get_data_batch_from_folder(index, batch_size, data_folder)
 
 def get_verify_data_batch_from_folder(index, batch_size):
@@ -141,3 +142,36 @@ def data_row_count():
 # how many data
 def data_batches_count(row_count, batch_size):
   return max(1, row_count // (1000000 // batch_size)), 1000000 // batch_size
+
+
+def signal_stats(response, y_val, threshold):
+  total = 0
+  found = 0
+  wrong = 0
+  threshold_rev = (-1) * threshold  # also count outliers with reversed sign
+
+  plain_y        = np.transpose(y_val[-1])[-1]
+  plain_response = np.transpose(response[-1])[-1]
+  for index_in_array in np.argwhere(plain_y >= threshold):
+    total += 1
+    index = index_in_array[-1]
+    if plain_response[index] >= threshold:
+      found += 1
+
+  for index_in_array in np.argwhere(plain_response >= threshold):
+    index = index_in_array[-1]
+    if plain_y[index] < threshold:
+      wrong += 1
+
+  for index_in_array in np.argwhere(plain_y <= threshold_rev):
+    total += 1
+    index = index_in_array[-1]
+    if plain_response[index] <= threshold_rev:
+      found += 1
+
+  for index_in_array in np.argwhere(plain_response <= threshold_rev):
+    index = index_in_array[-1]
+    if plain_y[index] > threshold_rev:
+      wrong += 1
+
+  return total, found, wrong
