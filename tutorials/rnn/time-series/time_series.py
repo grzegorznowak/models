@@ -78,6 +78,7 @@ class GRU_300_2_5(object):
     name           = "GRU_300_2_5"
     rnn_neurons    = 300
     batch_size     = 5
+    steps_number   = 1
     rnn_layers     = 2
     n_inputs       = 6
     n_outputs      = 1
@@ -113,16 +114,106 @@ class GRU_300_2_10_5(object):
     n_inputs       = 6
     n_outputs      = 1
     initial_lr     = 0.001   #initial learning rate
-    decay_lr       = 0.97
+    decay_lr       = 0.98
+    keep_prob      = 0.5     # dropout only on RNN layer(s)
+    full_mse_count = 4
+
+    def create_rnn(self):
+        return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) # try using faster cells?
+
+
+class GRU_400_3_10_1(object):
+    name           = "GRU_400_3_10_1"
+    rnn_neurons    = 400
+    batch_size     = 10
+    steps_number   = 1
+    rnn_layers     = 3
+    n_inputs       = 6
+    n_outputs      = 1
+    initial_lr     = 0.0005   #initial learning rate
+    decay_lr       = 0.99
+    keep_prob      = 0.5     # dropout only on RNN layer(s)
+    full_mse_count = 3
+
+    def create_rnn(self):
+        return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) # try using faster cells?
+
+
+class GRU_300_2_10_10_SGD(object):
+    name           = "GRU_300_2_10_10_SGD"
+    rnn_neurons    = 300
+    batch_size     = 10
+    steps_number   = 10
+    rnn_layers     = 2
+    n_inputs       = 6
+    n_outputs      = 1
+    initial_lr     = 0.002   #initial learning rate
+    ramp_start     = 0.02 * initial_lr
+    ramp_steps     = 10
+    ramp_increase  = (initial_lr - ramp_start) / ramp_steps
+    decay_lr       = 0.5
+    decay_step     = 10  # how many epochs to process before decreasing LR
+    keep_prob      = 0.5     # dropout only on RNN layer(s)
+    full_mse_count = 3
+
+    def create_rnn(self):
+        return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) # try using faster cells?
+
+    def get_optimizer(self, learning_rate):
+        return tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
+
+
+class GRU_300_5_10_20_SDG(object):
+    name           = "GRU_300_5_10_20_SDG"
+    rnn_neurons    = 300
+    rnn_layers     = 5
+    batch_size     = 10
+    steps_number   = 20
+    n_inputs       = 6
+    n_outputs      = 1
+    initial_lr     = 0.001 * batch_size * steps_number    #initial learning rate
+    ramp_start     = 0.1 * initial_lr
+    ramp_steps     = 10
+    ramp_increase  = (initial_lr - ramp_start) / ramp_steps
+    decay_lr       = 0.1
+    decay_step     = 30  # how many epochs to process before decreasing LR
     keep_prob      = 0.5     # dropout only on RNN layer(s)
     full_mse_count = 2
 
     def create_rnn(self):
-        return tf.contrib.rnn.BasicRNNCell(num_units=self.rnn_neurons) # try using faster cells?
+        return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) # try using faster cells?
+
+    def get_optimizer(self, learning_rate):
+        return tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
+
+class GRU_400_2_10_20_SDG(object):
+    name           = "GRU_400_2_10_20_SDG"
+    rnn_neurons    = 400
+    rnn_layers     = 2
+    batch_size     = 10
+    steps_number   = 20
+    n_inputs       = 6
+    n_outputs      = 1
+    initial_lr     = 0.001 * batch_size * steps_number * n_inputs   #initial learning rate
+    ramp_start     = 0.02 * initial_lr
+    ramp_steps     = 10
+    ramp_increase  = (initial_lr - ramp_start) / ramp_steps
+    decay_lr       = 0.5
+    decay_step     = 20  # how many epochs to process before decreasing LR
+    keep_prob      = 0.5     # dropout only on RNN layer(s)
+    full_mse_count = 2
+
+    def create_rnn(self):
+        return tf.contrib.rnn.GRUCell(num_units=self.rnn_neurons) # try using faster cells?
+
+    def get_optimizer(self, learning_rate):
+        return tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
+
+model_config = GRU_400_2_10_20_SDG
 
 class GraphWrapper():
   def __init__(self, graph, init_op, initial_state_placeholder, multi_layer_cell,
-               final_state_op, train_day, X, y, epoch, loss, outputs, learning_rate,
+               final_state_op, train_day, X, y, epoch, loss, outputs_int, outputs, learning_rate,
                training_op, keep_prob, summary_op, rnn_outputs, final_state, stacked_rnn_outputs,
                stacked_outputs, is_training, saver, totals_summary_op, total_train_mse,
                total_verification_mse, mild_signals_found, mild_signals_wrong,
@@ -137,7 +228,8 @@ class GraphWrapper():
      self.y_placeholder             = y
      self.epoch_placeholder         = epoch
      self.loss_placeholder          = loss
-     self.outputs_placeholder       = outputs
+     self.outputs_placeholder       = outputs_int
+     self.outputs_raw_placeholder   = outputs
      self.learning_rate_placeholder = learning_rate
      self.training_op_placeholder   = training_op
      self.keep_prob_placeholder     = keep_prob
@@ -184,36 +276,33 @@ def build_rnn_time_series_graph(graph_config):
 
     cell_layers    = [graph_config.create_rnn()  for _ in range(graph_config.rnn_layers)]
     dropout_layers = [create_dropout(cell_layer) for cell_layer in cell_layers]
-
-    hidden_input_0             = tf.layers.dense(X, graph_config.n_inputs, name="hidden_input_0")
-    print(hidden_input_0)
-    hidden_normalization_0     = tf.contrib.layers.layer_norm(hidden_input_0, begin_norm_axis=2)  # normalize each batch separately
-    hidden_normalization_0_act = tf.nn.elu(hidden_normalization_0)
+    #
+    # hidden_input_0             = tf.layers.dense(X, graph_config.n_inputs, name="hidden_input_0")
+    # hidden_normalization_0     = tf.contrib.layers.layer_norm(hidden_input_0, begin_norm_axis=2)  # normalize each batch separately
+    # hidden_normalization_0_act = tf.nn.elu(hidden_normalization_0)
 
     multi_layer_cell           = tf.contrib.rnn.MultiRNNCell(dropout_layers, state_is_tuple=False)
-    print(initial_state_placeholder)
-    rnn_outputs, final_state   = tf.nn.dynamic_rnn(multi_layer_cell, hidden_normalization_0_act,
+    rnn_outputs, final_state   = tf.nn.dynamic_rnn(multi_layer_cell, X,
                                                    dtype=tf.float32,
                                                    initial_state=initial_state_placeholder)
-
-    print(final_state)
+    print(rnn_outputs)
     stacked_rnn_outputs = tf.reshape(rnn_outputs, [-1, graph_config.rnn_neurons], name="stacked_rnn_outputs")
-
     stacked_outputs     = tf.layers.dense(stacked_rnn_outputs, graph_config.n_outputs, name="stacked_outputs")
     outputs             = tf.reshape(stacked_outputs,
-                                     [-1, graph_config.steps_number, graph_config.n_outputs],
+                                     [graph_config.batch_size, graph_config.steps_number, graph_config.n_outputs],
                                      name="outputs")
-    outputs_int = tf.cast(outputs, tf.int32)
-    loss        = tf.losses.mean_squared_error(y , outputs)
-    optimizer   = tf.train.AdamOptimizer(learning_rate=learning_rate)
-    #optimizer  = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
 
-  #  gvs        = optimizer.compute_gradients(loss)
+    loss        = tf.reduce_mean(tf.abs(y - outputs))
+ #   optimizer   = tf.train.AdamOptimizer(learning_rate=learning_rate)
+    optimizer  = graph_config.get_optimizer(learning_rate)
+
+ #   gvs        = optimizer.compute_gradients(loss)
   #  capped_gvs = [(tf.clip_by_value(grad, -20., 20.), var) for grad, var in gvs]
-  #  training_op = optimizer.apply_gradients(capped_gvs, name="training_op")
+ #   training_op = optimizer.apply_gradients(gvs, name="training_op")
 
     training_op    = optimizer.minimize(loss, name="training_op")
 
+    outputs_int = tf.cast(outputs, tf.int32)
 
     # mergable summaries
     learning_rate_summary = tf.summary.scalar("learning_rate", learning_rate)
@@ -244,7 +333,7 @@ def build_rnn_time_series_graph(graph_config):
     saver = tf.train.Saver(max_to_keep=0)
 
   return GraphWrapper(graph, init, initial_state_placeholder, multi_layer_cell, final_state,
-                      train_day, X, y, epoch, loss, outputs_int, learning_rate, training_op,
+                      train_day, X, y, epoch, loss, outputs_int, outputs, learning_rate, training_op,
                       keep_prob, summary_op, rnn_outputs, final_state, stacked_rnn_outputs,
                       stacked_outputs, is_training, saver, totals_summary_op,
                       total_train_mse, total_verification_mse, mild_signals_found, mild_signals_wrong,
@@ -277,7 +366,7 @@ def measure_performance(zero_state, X, y, graph_wrapper, sess, verification_day_
 
     if batch_number % 20 == 0: # print out details only every 10
       print("Verification batch number: ", batch_number,
-          "\tvY vs vResp:",
+          "\tvY vs vResp: \n",
             np.transpose(y[batch_number]), "<->\n",  np.transpose(train_response),
           "\tBatch MSE: ", mse)
 
@@ -299,7 +388,6 @@ def training_iteration(previous_state, current_learning_rate, iteration, epoch, 
   loss          = graph_wrapper.loss_placeholder
   is_training_placeholder = graph_wrapper.is_training_placeholder
 
-  
   train, new_state = session.run([training_op, new_state_op],
                                       feed_dict={X: train_X, y: train_y, keep_prob: training_config.keep_prob,
                                                  learning_rate: current_learning_rate,
@@ -398,7 +486,7 @@ def main(_):
     print("wrong usage")
     os.exit(1)
 
-  training_config  = GRU_300_2_10_5()
+  training_config  = model_config()
 
   # @TODO: need to redo those CMD params logic when they grow in number. Just stick to the bruteforce IF power
   if is_training or is_continue:
@@ -447,40 +535,40 @@ def main(_):
 
       days_worth_of_data        = end_day - start_day
       days_between_mse_snapshot = days_worth_of_data // training_config.full_mse_count  # make full train/ver sets MSE snapshot every that many days
-      for epoch in range(2, epochs):
+      for epoch in range(0, epochs):
         log_dir     = "{}/run-{}-{}-{}/".format('/tmp/time_series_logdir', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
         save_dir    = "{}/run-{}-{}-{}/".format('/tmp/time_series', datetime.utcnow().strftime("%Y%m%d%H%M%S"), epoch, training_config.name)
         file_writer = tf.summary.FileWriter(log_dir, tf.get_default_graph())  # TODO: each epoch will create a redundant node in graph, make it more TF way
 
         epoch_iteration       = 0
-        current_learning_rate = training_config.initial_lr * (training_config.decay_lr**epoch)
+        decay_multiplier      = -1
+        if epoch <= training_config.ramp_steps:
+            current_learning_rate = training_config.ramp_start + training_config.ramp_increase * epoch
+        else:
+            decay_multiplier = (epoch - training_config.ramp_steps) // training_config.decay_step
+            current_learning_rate = training_config.initial_lr * (training_config.decay_lr**decay_multiplier)
 
-        verification_X, verification_y = tsd.get_train_data_batches(days_worth_of_data // 2, training_config.batch_size, training_config.steps_number)
-
+        verification_X, verification_y = tsd.get_verification_data_bathes(0, training_config.batch_size, training_config.steps_number, randomize=True)
         print("days_between_mse_snapshot: ", days_between_mse_snapshot)
 
         for data_batch in range(days_worth_of_data):
-          train_X, train_y = tsd.get_train_data_batches(data_batch, training_config.batch_size, training_config.steps_number)
+          train_X, train_y = tsd.get_train_data_batches(data_batch, training_config.batch_size, training_config.steps_number, randomize=True)
           data_batch_size  = len(train_X)
 
           previous_state_value = zero_state()
 
           print("Training ", epoch, "epoch, \tlearning rate:", current_learning_rate,"\ttrain set len of: ", data_batch_size,
-                " iterations, \ncurrent data batch: ",data_batch, ' / ', train_data_batches_count, ' simulating day no. ', data_batch)
-
-
-          for data_iteration in range(data_batch_size):
-            previous_state_value = training_iteration(previous_state_value, current_learning_rate, epoch_iteration, epoch, data_batch, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], graph_wrapper, sess, saver, save_dir, file_writer, training_config)
-            epoch_iteration     += training_config.batch_size
+                " iterations, \ncurrent data batch: ",data_batch, ' / ', train_data_batches_count, ' simulating day no. ', data_batch,
+                "decay_multiplier: ", decay_multiplier)
 
           if data_batch % 10 == 0:
             # print out verification stats every a few days worth of training
             measure_performance(zero_state(), verification_X, verification_y, graph_wrapper, sess, days_worth_of_data // 2)
 
-          if (data_batch+1) % days_between_mse_snapshot == 0:
+          if data_batch % days_between_mse_snapshot == 0:
                total_verify_mse, mild_right_ratio, mild_wrong_ratio, strong_right_ratio, strong_wrong_ratio = get_stats_for_data_set(zero_state, training_config, graph_wrapper, sess, verify_data_batches_count, tsd.get_verification_data_bathes)
-               # only 5% of train data please, just so we have some data but not clog the learning process
-               total_train_mse, _, _, _, _  = get_stats_for_data_set(zero_state, training_config, graph_wrapper, sess, train_data_batches_count // 20 , tsd.get_train_data_batches)
+               # only 10% of train data please, just so we have some data but not clog the learning process
+               total_train_mse, _, _, _, _  = get_stats_for_data_set(zero_state, training_config, graph_wrapper, sess, train_data_batches_count // 10 , tsd.get_train_data_batches)
                summary          = sess.run(totals_summary_op,
                                            feed_dict={total_train_mse_op: total_train_mse,
                                                       mild_signals_found: mild_right_ratio,
@@ -491,6 +579,9 @@ def main(_):
 
                file_writer.add_summary(summary, data_batch)
 
+          for data_iteration in range(data_batch_size):
+            previous_state_value = training_iteration(previous_state_value, current_learning_rate, epoch_iteration, epoch, data_batch, train_X[data_iteration % data_batch_size], train_y[data_iteration % data_batch_size], graph_wrapper, sess, saver, save_dir, file_writer, training_config)
+            epoch_iteration     += training_config.batch_size
 
         file_writer.close()
         saver.save(sess, save_dir + "model_final_" + str(epoch) + ".ckpt")

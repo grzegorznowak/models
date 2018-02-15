@@ -44,18 +44,16 @@ class TimesSeriesReaderTest(tf.test.TestCase):
                        10
                        )
 
-      print(res)
+
 
   def testCsvReading(self):
 
-    size = 5
-    Xs, ys = tsd.get_train_data_batches(0, 5, 1)
 
- #   print(Xs[0])
+    Xs, ys = tsd.get_train_data_batches(0, 10, 5)
 
-    Xs2, y2 = tsd.get_train_data_batch_from_folder(0,5)
+    print(Xs[0])
 
-  #  print(Xs2[0])
+
     #print(gg[1:3])
     # for _ in range(10):
     #   (X, y), random_index = get_random_data_batch_from_folder(4)
